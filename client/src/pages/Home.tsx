@@ -4,6 +4,8 @@ import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 import {
   BarChart3,
+  Bell,
+  BellRing,
   BookOpen,
   BrainCircuit,
   CalendarDays,
@@ -35,12 +37,14 @@ type Language = "ar" | "tr" | "en";
 type Task = { id: string; time: string; title: string; icon: string; done: boolean };
 type SchoolTask = { id: string; subject: string; task: string; recitation: string; homework: string; details: string; due: string; done: boolean };
 type Note = { id: string; type: "goal" | "idea" | "reminder" | "good"; text: string };
+type CustomNotification = { id: string; title: string; message: string; time: string; enabled: boolean; lastTriggered?: string };
 type WeekDay = { id: string; label: string; short: string; progress: number; status: "pending" | "complete" | "missed" };
 type PlannerState = {
   tasks: Task[];
   prayers: Record<string, boolean>;
   school: SchoolTask[];
   notes: Note[];
+  notifications: CustomNotification[];
   week: WeekDay[];
   settings: { language: Language; theme: "dark" | "light"; wake: string; sleep: string; school: string };
 };
@@ -64,6 +68,7 @@ const createInitialState = (): PlannerState => ({
     { id: "note-reminder", type: "reminder", text: "تجهيز حقيبة الغد قبل النوم." },
     { id: "note-good", type: "good", text: "ما الشيء الجميل الذي حدث اليوم؟" },
   ],
+  notifications: [],
   week: [
     { id: "sat", label: "السبت", short: "س", progress: 58, status: "complete" },
     { id: "sun", label: "الأحد", short: "ح", progress: 72, status: "complete" },
@@ -103,13 +108,21 @@ export default function Home() {
   const { user, isAuthenticated, loading } = useAuth();
   const [page, setPage] = useState<Page>("today");
   const [state, setState] = useState<PlannerState>(() => {
-    try { const saved = localStorage.getItem("roni-planner-state"); return saved ? JSON.parse(saved) : createInitialState(); } catch { return createInitialState(); }
+    try {
+      const saved = localStorage.getItem("roni-planner-state");
+      if (!saved) return createInitialState();
+      const parsed = JSON.parse(saved) as Partial<PlannerState>;
+      return { ...createInitialState(), ...parsed, notifications: parsed.notifications ?? [] };
+    } catch { return createInitialState(); }
   });
   const [remoteReady, setRemoteReady] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
   const [newTask, setNewTask] = useState({ time: "", title: "", icon: "✨" });
   const [addingSchool, setAddingSchool] = useState(false);
   const [newSchool, setNewSchool] = useState({ subject: "", task: "", recitation: "", homework: "", details: "", due: "" });
+  const [newNotification, setNewNotification] = useState({ title: "", message: "", time: "" });
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(typeof Notification === "undefined" ? "denied" : Notification.permission);
+  const [activeAlert, setActiveAlert] = useState<CustomNotification | null>(null);
   const utils = trpc.useUtils();
   const remote = trpc.planner.get.useQuery(undefined, { enabled: isAuthenticated });
   const saveRemote = trpc.planner.save.useMutation({ onSuccess: () => utils.planner.get.invalidate() });
@@ -128,7 +141,7 @@ export default function Home() {
   useEffect(() => {
     if (!isAuthenticated) { setRemoteReady(true); return; }
     if (!remote.isFetched) return;
-    if (remote.data?.data) { try { setState(JSON.parse(remote.data.data) as PlannerState); } catch { /* retain local data if a stale document is malformed */ } }
+    if (remote.data?.data) { try { const parsed = JSON.parse(remote.data.data) as Partial<PlannerState>; setState(previous => ({ ...previous, ...parsed, notifications: parsed.notifications ?? previous.notifications ?? [] })); } catch { /* retain local data if a stale document is malformed */ } }
     setRemoteReady(true);
   }, [isAuthenticated, remote.isFetched, remote.data?.data]);
   useEffect(() => {
@@ -136,6 +149,23 @@ export default function Home() {
     const timer = window.setTimeout(() => saveRemote.mutate({ data: JSON.stringify(state) }), 900);
     return () => window.clearTimeout(timer);
   }, [state, isAuthenticated, remoteReady]);
+
+  useEffect(() => {
+    const checkReminders = () => {
+      const now = new Date();
+      const todayKey = now.toISOString().slice(0, 10);
+      const currentTime = now.toTimeString().slice(0, 5);
+      const due = state.notifications.find(item => item.enabled && item.time === currentTime && item.lastTriggered !== todayKey);
+      if (!due) return;
+      update(previous => ({ ...previous, notifications: previous.notifications.map(item => item.id === due.id ? { ...item, lastTriggered: todayKey } : item) }));
+      setActiveAlert(due);
+      if (notificationPermission === "granted") new Notification(due.title, { body: due.message || "لديك تذكير من RONI Planner" });
+      window.setTimeout(() => setActiveAlert(null), 7000);
+    };
+    checkReminders();
+    const timer = window.setInterval(checkReminders, 15000);
+    return () => window.clearInterval(timer);
+  }, [state.notifications, notificationPermission]);
 
   const update = (fn: (previous: PlannerState) => PlannerState) => setState(fn);
   const changePage = (nextPage: Page) => {
@@ -147,6 +177,8 @@ export default function Home() {
   const editTask = (task: Task) => { const title = window.prompt("اسم المهمة", task.title); const time = window.prompt("الوقت", task.time); if (title?.trim() && time?.trim()) update(previous => ({ ...previous, tasks: previous.tasks.map(item => item.id === task.id ? { ...item, title: title.trim(), time: time.trim() } : item) })); };
   const addTask = () => { if (!newTask.title.trim() || !newTask.time.trim()) return; update(previous => ({ ...previous, tasks: [...previous.tasks, { id: `custom-${Date.now()}`, title: newTask.title.trim(), time: newTask.time.trim(), icon: newTask.icon || "✨", done: false }].sort((a, b) => a.time.localeCompare(b.time)) })); setNewTask({ time: "", title: "", icon: "✨" }); setAddingTask(false); };
   const addSchool = () => { if (!newSchool.subject.trim() || !newSchool.task.trim()) return; update(previous => ({ ...previous, school: [...previous.school, { ...newSchool, id: `school-${Date.now()}`, done: false }] })); setNewSchool({ subject: "", task: "", recitation: "", homework: "", details: "", due: "" }); setAddingSchool(false); };
+  const addNotification = () => { if (!newNotification.title.trim() || !newNotification.time) return; update(previous => ({ ...previous, notifications: [...previous.notifications, { ...newNotification, id: `notification-${Date.now()}`, enabled: true }] })); setNewNotification({ title: "", message: "", time: "" }); };
+  const requestNotificationPermission = async () => { if (typeof Notification === "undefined") return; const permission = await Notification.requestPermission(); setNotificationPermission(permission); };
   const resetToday = () => { if (window.confirm("هل تريد إعادة ضبط بيانات اليوم؟")) update(previous => ({ ...previous, tasks: previous.tasks.map(task => ({ ...task, done: false })), prayers: Object.fromEntries(Object.keys(previous.prayers).map(key => [key, false])), school: previous.school.map(item => ({ ...item, done: false })) })); };
   const resetWeek = () => { if (window.confirm("هل تريد إعادة ضبط الأسبوع؟")) update(previous => ({ ...previous, week: previous.week.map(day => ({ ...day, progress: 0, status: "pending" })) })); };
 
@@ -173,11 +205,11 @@ export default function Home() {
 
   const StatsPage = () => <div className="page-stack"><section className="page-header"><div><div className="eyebrow"><BarChart3 size={15}/> التفاصيل المهمة</div><h1>📊 الإحصائيات</h1><p>أرقام واضحة لتعرف أين وصل يومك وأسبوعك.</p></div></section><section className="stats-grid"><article className="metric-card featured"><div><span>نسبة إنجاز اليوم</span><strong>{completion}%</strong><p>المهام والصلوات معًا</p></div><ProgressRing value={completion} size={104}/></article><article className="metric-card"><span className="metric-icon blue"><Check size={19}/></span><strong>{taskDone}</strong><p>المهام المكتملة</p></article><article className="metric-card"><span className="metric-icon violet"><Clock3 size={19}/></span><strong>{state.tasks.length - taskDone}</strong><p>مهام متبقية</p></article><article className="metric-card"><span className="metric-icon gold"><Moon size={19}/></span><strong>{prayerDone} / 5</strong><p>صلوات مكتملة</p></article><article className="metric-card"><span className="metric-icon rose"><BookOpen size={19}/></span><strong>{schoolDone}</strong><p>واجبات مكتملة</p></article></section><section className="analytics-row"><article className="panel chart-panel"><SectionTitle icon={TrendingUp} title="إنجاز الأسبوع"/><div className="chart-bars">{[...state.week.slice(0, 6), {id: "today", short: "ي", label: "اليوم", progress: completion, status: "pending" as const}].map(day => <div key={day.id}><i style={{height: `${Math.max(day.progress, 5)}%`}}/><span>{day.short}</span></div>)}</div></article><article className="panel best-day"><span className="sparkle-wrap"><Sparkles size={20}/></span><div><p>أفضل يوم خلال الأسبوع</p><strong>{bestDay.label}</strong><span>{bestDay.progress}% إنجاز</span></div></article></section></div>;
 
-  const SettingsPage = () => <div className="page-stack"><section className="page-header"><div><div className="eyebrow"><Settings2 size={15}/> خصّص تجربتك</div><h1>⚙️ الإعدادات</h1><p>تعديلات بسيطة حتى يعمل المخطط على طريقتك.</p></div></section><section className="settings-grid"><article className="panel settings-card"><h3>اللغة</h3><div className="segmented">{(["ar", "tr", "en"] as Language[]).map(language => <button key={language} className={state.settings.language === language ? "active" : ""} onClick={() => update(previous => ({...previous, settings: {...previous.settings, language}}))}>{language === "ar" ? "العربية" : language === "tr" ? "Türkçe" : "English"}</button>)}</div></article><article className="panel settings-card"><h3>المظهر</h3><div className="theme-options"><button className={state.settings.theme === "dark" ? "active" : ""} onClick={() => update(previous => ({...previous, settings: {...previous.settings, theme: "dark"}}))}><Moon size={17}/> داكن</button><button className={state.settings.theme === "light" ? "active" : ""} onClick={() => update(previous => ({...previous, settings: {...previous.settings, theme: "light"}}))}><Sun size={17}/> فاتح</button></div></article><article className="panel settings-card schedule-card"><h3>أوقات اليوم</h3><label>وقت الاستيقاظ <input type="time" value={state.settings.wake} onChange={e => update(previous => ({...previous, settings: {...previous.settings, wake: e.target.value}}))}/></label><label>وقت النوم <input type="time" value={state.settings.sleep} onChange={e => update(previous => ({...previous, settings: {...previous.settings, sleep: e.target.value}}))}/></label><label>وقت المدرسة <input value={state.settings.school} onChange={e => update(previous => ({...previous, settings: {...previous.settings, school: e.target.value}}))}/></label></article><article className="panel settings-card cloud-card"><div><span className="metric-icon blue"><CloudIcon /></span><h3>{t.cloud}</h3><p>{isAuthenticated ? (saveRemote.isPending ? "جارٍ حفظ آخر التعديلات…" : "تتم مزامنة خطتك تلقائيًا وبشكل خاص.") : "تُحفظ خطتك على هذا الجهاز. سجّل الدخول للمزامنة."}</p></div>{!loading && !isAuthenticated && <Button onClick={() => startLogin()}><LogIn size={16}/>{t.signIn}</Button>}</article><article className="panel settings-card danger-card"><h3>إعادة الضبط</h3><p>استخدم هذه الخيارات لبدء صفحة جديدة.</p><div><Button variant="outline" onClick={resetToday}>إعادة ضبط اليوم</Button><Button variant="outline" onClick={resetWeek}>إعادة ضبط الأسبوع</Button></div></article></section></div>;
+  const SettingsPage = () => <div className="page-stack"><section className="page-header"><div><div className="eyebrow"><Settings2 size={15}/> خصّص تجربتك</div><h1>⚙️ الإعدادات</h1><p>تعديلات بسيطة حتى يعمل المخطط على طريقتك.</p></div></section><section className="settings-grid"><article className="panel settings-card"><h3>اللغة</h3><div className="segmented">{(["ar", "tr", "en"] as Language[]).map(language => <button key={language} className={state.settings.language === language ? "active" : ""} onClick={() => update(previous => ({...previous, settings: {...previous.settings, language}}))}>{language === "ar" ? "العربية" : language === "tr" ? "Türkçe" : "English"}</button>)}</div></article><article className="panel settings-card"><h3>المظهر</h3><div className="theme-options"><button className={state.settings.theme === "dark" ? "active" : ""} onClick={() => update(previous => ({...previous, settings: {...previous.settings, theme: "dark"}}))}><Moon size={17}/> داكن</button><button className={state.settings.theme === "light" ? "active" : ""} onClick={() => update(previous => ({...previous, settings: {...previous.settings, theme: "light"}}))}><Sun size={17}/> فاتح</button></div></article><article className="panel settings-card schedule-card"><h3>أوقات اليوم</h3><label>وقت الاستيقاظ <input type="time" value={state.settings.wake} onChange={e => update(previous => ({...previous, settings: {...previous.settings, wake: e.target.value}}))}/></label><label>وقت النوم <input type="time" value={state.settings.sleep} onChange={e => update(previous => ({...previous, settings: {...previous.settings, sleep: e.target.value}}))}/></label><label>وقت المدرسة <input value={state.settings.school} onChange={e => update(previous => ({...previous, settings: {...previous.settings, school: e.target.value}}))}/></label></article><article className="panel settings-card cloud-card"><div><span className="metric-icon blue"><CloudIcon /></span><h3>{t.cloud}</h3><p>{isAuthenticated ? (saveRemote.isPending ? "جارٍ حفظ آخر التعديلات…" : "تتم مزامنة خطتك تلقائيًا وبشكل خاص.") : "تُحفظ خطتك على هذا الجهاز. سجّل الدخول للمزامنة."}</p></div>{!loading && !isAuthenticated && <Button onClick={() => startLogin()}><LogIn size={16}/>{t.signIn}</Button>}</article><article className="panel settings-card notifications-card"><div className="settings-card-heading"><div><span className="metric-icon blue"><BellRing size={18}/></span><h3>التذكيرات المخصصة</h3></div><span className="permission-pill">{notificationPermission === "granted" ? "إشعارات المتصفح مفعلة" : "داخل الموقع فقط"}</span></div><p>أنشئ تنبيهًا بعنوان ووقت محدد. سيظهر داخل التطبيق، ويمكن إرساله أيضًا كإشعار للمتصفح.</p><div className="notification-form"><input placeholder="عنوان التنبيه *" value={newNotification.title} onChange={e => setNewNotification({...newNotification, title: e.target.value})}/><input placeholder="رسالة قصيرة" value={newNotification.message} onChange={e => setNewNotification({...newNotification, message: e.target.value})}/><input type="time" aria-label="وقت التنبيه" value={newNotification.time} onChange={e => setNewNotification({...newNotification, time: e.target.value})}/><Button onClick={addNotification}><Plus size={15}/> إضافة</Button></div>{notificationPermission !== "granted" && typeof Notification !== "undefined" && <button type="button" className="permission-button" onClick={requestNotificationPermission}><Bell size={15}/> تفعيل إشعارات المتصفح</button>}<div className="notification-list">{state.notifications.length === 0 ? <span className="notification-empty">لا توجد تذكيرات بعد.</span> : state.notifications.map(item => <div className={`notification-row ${item.enabled ? "" : "disabled"}`} key={item.id}><button type="button" className="notification-toggle" onClick={() => update(previous => ({...previous, notifications: previous.notifications.map(row => row.id === item.id ? {...row, enabled: !row.enabled} : row)}))} aria-label="تفعيل أو تعطيل التذكير"><span className="notification-dot"><Bell size={13}/></span></button><div><strong>{item.title}</strong><small>{item.time}{item.message ? ` · ${item.message}` : ""}</small></div><button type="button" className="notification-delete" onClick={() => update(previous => ({...previous, notifications: previous.notifications.filter(row => row.id !== item.id)}))} aria-label="حذف التذكير"><Trash2 size={14}/></button></div>)}</div></article><article className="panel settings-card danger-card"><h3>إعادة الضبط</h3><p>استخدم هذه الخيارات لبدء صفحة جديدة.</p><div><Button variant="outline" onClick={resetToday}>إعادة ضبط اليوم</Button><Button variant="outline" onClick={resetWeek}>إعادة ضبط الأسبوع</Button></div></article></section></div>;
 
   const renderPage = () => ({ today: <TodayPage />, week: <WeekPage />, school: <SchoolPage />, notes: <NotesPage />, stats: <StatsPage />, settings: <SettingsPage /> })[page];
 
-  return <div className={`planner-shell ${state.settings.theme}`} dir={state.settings.language === "ar" ? "rtl" : "ltr"}><aside className="sidebar"><div className="brand"><span className="brand-mark">R</span><div><strong>RONI</strong><small>PLANNER</small></div></div><nav>{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav><div className="sidebar-bottom"><div className="tiny-progress"><span>تقدم اليوم</span><strong>{completion}%</strong><i><b style={{width: `${completion}%`}}/></i></div><div className="profile-line"><span>{user?.name?.slice(0,1).toUpperCase() || "R"}</span><div><strong>{user?.name || "RONI Planner"}</strong><small>{isAuthenticated ? "تمت المزامنة" : "محفوظ على الجهاز"}</small></div></div></div></aside><main className="app-main"><header className="mobile-header"><div className="brand"><span className="brand-mark">R</span><strong>RONI</strong></div><button type="button" onClick={() => changePage("settings")}><Settings2 size={19}/></button></header><div className="content-wrap">{renderPage()}</div></main><nav className="mobile-nav">{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav></div>;
+  return <div className={`planner-shell ${state.settings.theme}`} dir={state.settings.language === "ar" ? "rtl" : "ltr"}><>{activeAlert && <div className="notification-alert" role="status"><span className="notification-alert-icon"><BellRing size={18}/></span><div><strong>{activeAlert.title}</strong><p>{activeAlert.message || "حان وقت التذكير"}</p></div><button type="button" onClick={() => setActiveAlert(null)} aria-label="إغلاق التنبيه">×</button></div>}</><aside className="sidebar"><div className="brand"><span className="brand-mark">R</span><div><strong>RONI</strong><small>PLANNER</small></div></div><nav>{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav><div className="sidebar-bottom"><div className="tiny-progress"><span>تقدم اليوم</span><strong>{completion}%</strong><i><b style={{width: `${completion}%`}}/></i></div><div className="profile-line"><span>{user?.name?.slice(0,1).toUpperCase() || "R"}</span><div><strong>{user?.name || "RONI Planner"}</strong><small>{isAuthenticated ? "تمت المزامنة" : "محفوظ على الجهاز"}</small></div></div></div></aside><main className="app-main"><header className="mobile-header"><div className="brand"><span className="brand-mark">R</span><strong>RONI</strong></div><button type="button" onClick={() => changePage("settings")}><Settings2 size={19}/></button></header><div className="content-wrap">{renderPage()}</div></main><nav className="mobile-nav">{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav></div>;
 }
 
 function CloudIcon() { return <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.5 19H9a7 7 0 1 1 6.71-9.02A5.5 5.5 0 1 1 17.5 19Z"/></svg>; }
