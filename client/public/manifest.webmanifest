@@ -1,0 +1,16 @@
+{
+  "name": "RONI Planner",
+  "short_name": "RONI Planner",
+  "description": "مخطط يومي وأسبوعي مع تذكيرات وإشعارات للمهام",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#070b14",
+  "theme_color": "#070b14",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/roni-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
