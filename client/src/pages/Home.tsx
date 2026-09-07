@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ClipboardList,
   Clock3,
+  Download,
   Edit3,
   GraduationCap,
   Heart,
@@ -30,7 +31,7 @@ import {
   Trash2,
   TrendingUp,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Page = "today" | "week" | "school" | "notes" | "stats" | "settings";
 type Language = "ar" | "tr" | "en";
@@ -48,6 +49,8 @@ type PlannerState = {
   week: WeekDay[];
   settings: { language: Language; theme: "dark" | "light"; wake: string; sleep: string; school: string; taskReminders: boolean };
 };
+
+type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
 
 const DEFAULT_TASKS: Task[] = [
   ["08:00", "🌅", "الاستيقاظ"], ["08:15", "🧼", "النظافة الشخصية"], ["08:30", "🍳", "الفطور"],
@@ -129,6 +132,8 @@ export default function Home() {
   const [newNotification, setNewNotification] = useState({ title: "", message: "", time: "" });
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(typeof Notification === "undefined" ? "denied" : Notification.permission);
   const [activeAlert, setActiveAlert] = useState<CustomNotification | null>(null);
+  const [canInstall, setCanInstall] = useState(false);
+  const installPrompt = useRef<InstallPromptEvent | null>(null);
   const utils = trpc.useUtils();
   const remote = trpc.planner.get.useQuery(undefined, { enabled: isAuthenticated });
   const saveRemote = trpc.planner.save.useMutation({ onSuccess: () => utils.planner.get.invalidate() });
@@ -143,6 +148,15 @@ export default function Home() {
   const bestDay = useMemo(() => [...state.week, { id: "today", label: "اليوم", short: "ي", progress: completion, status: "pending" as const }].sort((a, b) => b.progress - a.progress)[0], [state.week, completion]);
 
   useEffect(() => { document.documentElement.dir = state.settings.language === "ar" ? "rtl" : "ltr"; document.documentElement.lang = state.settings.language === "ar" ? "ar" : state.settings.language; }, [state.settings.language]);
+  useEffect(() => {
+    const standalone = window.matchMedia("(display-mode: standalone)").matches || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+    if (standalone) return;
+    const onInstallPrompt = (event: Event) => { event.preventDefault(); installPrompt.current = event as InstallPromptEvent; setCanInstall(true); };
+    const onInstalled = () => { installPrompt.current = null; setCanInstall(false); };
+    window.addEventListener("beforeinstallprompt", onInstallPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => { window.removeEventListener("beforeinstallprompt", onInstallPrompt); window.removeEventListener("appinstalled", onInstalled); };
+  }, []);
   useEffect(() => { localStorage.setItem("roni-planner-state", JSON.stringify(state)); }, [state]);
   useEffect(() => {
     if (!isAuthenticated) { setRemoteReady(true); return; }
@@ -193,6 +207,7 @@ export default function Home() {
   const addSchool = () => { if (!newSchool.subject.trim() || !newSchool.task.trim()) return; update(previous => ({ ...previous, school: [...previous.school, { ...newSchool, id: `school-${Date.now()}`, done: false }] })); setNewSchool({ subject: "", task: "", recitation: "", homework: "", details: "", due: "" }); setAddingSchool(false); };
   const addNotification = () => { if (!newNotification.title.trim() || !newNotification.time) return; update(previous => ({ ...previous, notifications: [...previous.notifications, { ...newNotification, id: `notification-${Date.now()}`, enabled: true }] })); setNewNotification({ title: "", message: "", time: "" }); };
   const requestNotificationPermission = async () => { if (typeof Notification === "undefined") return; const permission = await Notification.requestPermission(); setNotificationPermission(permission); if (permission === "granted" && "serviceWorker" in navigator) await navigator.serviceWorker.register("/sw.js"); };
+  const installApp = async () => { const prompt = installPrompt.current; if (!prompt) return; await prompt.prompt(); const result = await prompt.userChoice; if (result.outcome === "accepted") setCanInstall(false); installPrompt.current = null; };
   const resetToday = () => { if (window.confirm("هل تريد إعادة ضبط بيانات اليوم؟")) update(previous => ({ ...previous, tasks: previous.tasks.map(task => ({ ...task, done: false })), prayers: Object.fromEntries(Object.keys(previous.prayers).map(key => [key, false])), school: previous.school.map(item => ({ ...item, done: false })) })); };
   const resetWeek = () => { if (window.confirm("هل تريد إعادة ضبط الأسبوع؟")) update(previous => ({ ...previous, week: previous.week.map(day => ({ ...day, progress: 0, status: "pending" })) })); };
 
@@ -223,7 +238,7 @@ export default function Home() {
 
   const renderPage = () => ({ today: TodayPage(), week: WeekPage(), school: SchoolPage(), notes: NotesPage(), stats: StatsPage(), settings: SettingsPage() })[page];
 
-  return <div className={`planner-shell ${state.settings.theme}`} dir={state.settings.language === "ar" ? "rtl" : "ltr"}><>{activeAlert && <div className="notification-alert" role="status"><span className="notification-alert-icon"><BellRing size={18}/></span><div><strong>{activeAlert.title}</strong><p>{activeAlert.message || "حان وقت التذكير"}</p></div><button type="button" onClick={() => setActiveAlert(null)} aria-label="إغلاق التنبيه">×</button></div>}</><aside className="sidebar"><div className="brand"><span className="brand-mark">R</span><div><strong>RONI</strong><small>PLANNER</small></div></div><nav>{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav><div className="sidebar-bottom"><div className="tiny-progress"><span>تقدم اليوم</span><strong>{completion}%</strong><i><b style={{width: `${completion}%`}}/></i></div><div className="profile-line"><span>{user?.name?.slice(0,1).toUpperCase() || "R"}</span><div><strong>{user?.name || "RONI Planner"}</strong><small>{isAuthenticated ? "تمت المزامنة" : "محفوظ على الجهاز"}</small></div></div></div></aside><main className="app-main"><header className="mobile-header"><div className="brand"><span className="brand-mark">R</span><strong>RONI</strong></div><button type="button" onClick={() => changePage("settings")}><Settings2 size={19}/></button></header><div className="content-wrap">{renderPage()}</div></main><nav className="mobile-nav">{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav></div>;
+  return <div className={`planner-shell ${state.settings.theme}`} dir={state.settings.language === "ar" ? "rtl" : "ltr"}><>{activeAlert && <div className="notification-alert" role="status"><span className="notification-alert-icon"><BellRing size={18}/></span><div><strong>{activeAlert.title}</strong><p>{activeAlert.message || "حان وقت التذكير"}</p></div><button type="button" onClick={() => setActiveAlert(null)} aria-label="إغلاق التنبيه">×</button></div>}</><aside className="sidebar"><div className="brand"><span className="brand-mark">R</span><div><strong>RONI</strong><small>PLANNER</small></div></div><nav>{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav><div className="sidebar-bottom"><div className="tiny-progress"><span>تقدم اليوم</span><strong>{completion}%</strong><i><b style={{width: `${completion}%`}}/></i></div><div className="profile-line"><span>{user?.name?.slice(0,1).toUpperCase() || "R"}</span><div><strong>{user?.name || "RONI Planner"}</strong><small>{isAuthenticated ? "تمت المزامنة" : "محفوظ على الجهاز"}</small></div></div></div></aside><main className="app-main"><header className="mobile-header"><div className="brand"><span className="brand-mark">R</span><strong>RONI</strong></div><button type="button" onClick={() => changePage("settings")}><Settings2 size={19}/></button></header><div className="content-wrap">{canInstall && <button type="button" className="install-app-button" onClick={installApp}><Download size={16}/> تثبيت التطبيق</button>}{renderPage()}</div></main><nav className="mobile-nav">{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav></div>;
 }
 
 function CloudIcon() { return <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.5 19H9a7 7 0 1 1 6.71-9.02A5.5 5.5 0 1 1 17.5 19Z"/></svg>; }
