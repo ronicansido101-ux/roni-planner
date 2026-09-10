@@ -16,6 +16,7 @@ import {
   Download,
   Edit3,
   GraduationCap,
+  History,
   Heart,
   Lightbulb,
   ListTodo,
@@ -34,11 +35,12 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type Page = "today" | "week" | "school" | "notes" | "stats" | "settings";
+type Page = "today" | "week" | "school" | "notes" | "stats" | "settings" | "history";
 type Language = "ar" | "tr" | "en";
 type NotificationSound = "soft" | "bell" | "digital" | "silent";
 type TaskColor = "blue" | "pink" | "white" | "green" | "orange";
 type Task = { id: string; time: string; title: string; icon: string; done: boolean; color?: TaskColor; lastTriggered?: string };
+type DayHistory = { id: string; date: string; tasks: Task[]; prayers: Record<string, boolean> };
 type SchoolTask = { id: string; subject: string; task: string; recitation: string; homework: string; details: string; due: string; done: boolean };
 type SchoolAttendance = { id: string; date: string; status: "present" | "absent"; note: string };
 type Note = { id: string; type: "goal" | "idea" | "reminder" | "good"; text: string };
@@ -46,6 +48,7 @@ type CustomNotification = { id: string; title: string; message: string; time: st
 type WeekDay = { id: string; label: string; short: string; progress: number; status: "pending" | "complete" | "missed" };
 type PlannerState = {
   activeDate: string;
+  history: DayHistory[];
   tasks: Task[];
   prayers: Record<string, boolean>;
   school: SchoolTask[];
@@ -71,6 +74,7 @@ const DEFAULT_TASKS: Task[] = [
 
 const createInitialState = (): PlannerState => ({
   activeDate: getLocalDateKey(),
+  history: [],
   tasks: DEFAULT_TASKS,
   prayers: { "الفجر": false, "الظهر": false, "العصر": false, "المغرب": false, "العشاء": false },
   school: [],
@@ -97,9 +101,13 @@ const createInitialState = (): PlannerState => ({
 function formatAttendanceDate(value: string) { return new Intl.DateTimeFormat("ar-EG", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(value + "T12:00:00")); }
 
 function resetDailyProgress(previous: PlannerState, date: string): PlannerState {
+  const historyEntry = previous.activeDate && previous.activeDate !== date && !previous.history.some(item => item.date === previous.activeDate)
+    ? { id: `history-${previous.activeDate}`, date: previous.activeDate, tasks: previous.tasks.map(task => ({ ...task })), prayers: { ...previous.prayers } }
+    : null;
   return {
     ...previous,
     activeDate: date,
+    history: historyEntry ? [historyEntry, ...previous.history].slice(0, 90) : previous.history,
     tasks: previous.tasks.map(task => ({ ...task, done: false, lastTriggered: undefined })),
     prayers: Object.fromEntries(Object.keys(previous.prayers).map(key => [key, false])),
   };
@@ -132,15 +140,15 @@ function getReminderTime(value: string) {
 }
 
 const copy = {
-  ar: { today: "اليوم", week: "الأسبوع", school: "المدرسة", notes: "الملاحظات", stats: "الإحصائيات", settings: "الإعدادات", greeting: "صباح الخير", add: "إضافة مهمة", remaining: "متبقية", complete: "مكتملة", insight: "تحليل نهاية اليوم", cloud: "الحفظ السحابي", signIn: "تسجيل الدخول", addSchool: "إضافة مادة", save: "حفظ" },
-  tr: { today: "Bugün", week: "Hafta", school: "Okul", notes: "Notlar", stats: "İstatistikler", settings: "Ayarlar", greeting: "Günaydın", add: "Görev ekle", remaining: "kalan", complete: "tamam", insight: "Gün sonu analizi", cloud: "Bulut kaydı", signIn: "Giriş yap", addSchool: "Ders ekle", save: "Kaydet" },
-  en: { today: "Today", week: "Week", school: "School", notes: "Notes", stats: "Statistics", settings: "Settings", greeting: "Good morning", add: "Add task", remaining: "remaining", complete: "complete", insight: "End-of-day review", cloud: "Cloud save", signIn: "Sign in", addSchool: "Add subject", save: "Save" },
+  ar: { today: "اليوم", week: "الأسبوع", school: "المدرسة", notes: "الملاحظات", stats: "الإحصائيات", settings: "الإعدادات", history: "السجل القديم", greeting: "صباح الخير", add: "إضافة مهمة", remaining: "متبقية", complete: "مكتملة", insight: "تحليل نهاية اليوم", cloud: "الحفظ السحابي", signIn: "تسجيل الدخول", addSchool: "إضافة مادة", save: "حفظ" },
+  tr: { today: "Bugün", week: "Hafta", school: "Okul", notes: "Notlar", stats: "İstatistikler", settings: "Ayarlar", history: "Geçmiş", greeting: "Günaydın", add: "Görev ekle", remaining: "kalan", complete: "tamam", insight: "Gün sonu analizi", cloud: "Bulut kaydı", signIn: "Giriş yap", addSchool: "Ders ekle", save: "Kaydet" },
+  en: { today: "Today", week: "Week", school: "School", notes: "Notes", stats: "Statistics", settings: "Settings", history: "History", greeting: "Good morning", add: "Add task", remaining: "remaining", complete: "complete", insight: "End-of-day review", cloud: "Cloud save", signIn: "Sign in", addSchool: "Add subject", save: "Save" },
 };
 
 const navItems = [
   { id: "today" as Page, icon: ListTodo, key: "today" }, { id: "week" as Page, icon: CalendarDays, key: "week" },
   { id: "school" as Page, icon: GraduationCap, key: "school" }, { id: "notes" as Page, icon: StickyNote, key: "notes" },
-  { id: "stats" as Page, icon: BarChart3, key: "stats" }, { id: "settings" as Page, icon: Settings2, key: "settings" },
+  { id: "stats" as Page, icon: BarChart3, key: "stats" }, { id: "history" as Page, icon: History, key: "history" }, { id: "settings" as Page, icon: Settings2, key: "settings" },
 ];
 
 function ProgressRing({ value, size = 118 }: { value: number; size?: number }) {
@@ -209,7 +217,7 @@ export default function Home() {
   useEffect(() => {
     if (!isAuthenticated) { setRemoteReady(true); return; }
     if (!remote.isFetched) return;
-    if (remote.data?.data) { try { const parsed = JSON.parse(remote.data.data) as Partial<PlannerState>; setState(previous => { const todayKey = getLocalDateKey(); const loaded = { ...previous, ...parsed, notifications: parsed.notifications ?? previous.notifications ?? [], attendance: parsed.attendance ?? previous.attendance ?? [], settings: { ...previous.settings, ...(parsed.settings ?? {}) } }; return loaded.activeDate !== todayKey ? resetDailyProgress(loaded, todayKey) : loaded; }); } catch { /* retain local data if a stale document is malformed */ } }
+    if (remote.data?.data) { try { const parsed = JSON.parse(remote.data.data) as Partial<PlannerState>; setState(previous => { const todayKey = getLocalDateKey(); const loaded = { ...previous, ...parsed, history: parsed.history ?? previous.history ?? [], notifications: parsed.notifications ?? previous.notifications ?? [], attendance: parsed.attendance ?? previous.attendance ?? [], settings: { ...previous.settings, ...(parsed.settings ?? {}) } }; return loaded.activeDate !== todayKey ? resetDailyProgress(loaded, todayKey) : loaded; }); } catch { /* retain local data if a stale document is malformed */ } }
     setRemoteReady(true);
   }, [isAuthenticated, remote.isFetched, remote.data?.data]);
   useEffect(() => {
@@ -300,7 +308,9 @@ export default function Home() {
 
   const SettingsPage = () => <div className="page-stack"><section className="page-header"><div><div className="eyebrow"><Settings2 size={15}/> خصّص تجربتك</div><h1>⚙️ الإعدادات</h1><p>تعديلات بسيطة حتى يعمل المخطط على طريقتك.</p></div></section><section className="settings-grid"><article className="panel settings-card"><h3>اللغة</h3><div className="segmented">{(["ar", "tr", "en"] as Language[]).map(language => <button key={language} className={state.settings.language === language ? "active" : ""} onClick={() => update(previous => ({...previous, settings: {...previous.settings, language}}))}>{language === "ar" ? "العربية" : language === "tr" ? "Türkçe" : "English"}</button>)}</div></article><article className="panel settings-card"><h3>المظهر</h3><div className="theme-options"><button className={state.settings.theme === "dark" ? "active" : ""} onClick={() => update(previous => ({...previous, settings: {...previous.settings, theme: "dark"}}))}><Moon size={17}/> داكن</button><button className={state.settings.theme === "light" ? "active" : ""} onClick={() => update(previous => ({...previous, settings: {...previous.settings, theme: "light"}}))}><Sun size={17}/> فاتح</button><button className={state.settings.theme === "pink" ? "active pink-theme-button" : "pink-theme-button"} onClick={() => update(previous => ({...previous, settings: {...previous.settings, theme: "pink"}}))}>♡ أبيض وزهري</button></div></article><article className="panel settings-card schedule-card"><h3>أوقات اليوم</h3><label>وقت الاستيقاظ <input type="time" value={state.settings.wake} onChange={e => update(previous => ({...previous, settings: {...previous.settings, wake: e.target.value}}))}/></label><label>وقت النوم <input type="time" value={state.settings.sleep} onChange={e => update(previous => ({...previous, settings: {...previous.settings, sleep: e.target.value}}))}/></label><label>وقت المدرسة <input value={state.settings.school} onChange={e => update(previous => ({...previous, settings: {...previous.settings, school: e.target.value}}))}/></label><label className="task-reminder-setting"><input type="checkbox" checked={state.settings.taskReminders !== false} onChange={e => update(previous => ({...previous, settings: {...previous.settings, taskReminders: e.target.checked}}))}/><span>إشعار عند حلول وقت كل مهمة</span></label><div className="sound-setting"><label>صوت الإشعار<select value={state.settings.notificationSound} onChange={e => update(previous => ({ ...previous, settings: { ...previous.settings, notificationSound: e.target.value as NotificationSound } }))}><option value="soft">ناعم</option><option value="bell">جرس</option><option value="digital">رقمي</option><option value="silent">بدون صوت</option></select></label><button type="button" className="sound-test-button" onClick={() => playNotificationSound(state.settings.notificationSound)}>تجربة الصوت</button></div></article><article className="panel settings-card cloud-card"><div><span className="metric-icon blue"><CloudIcon /></span><h3>{t.cloud}</h3><p>{isAuthenticated ? (saveRemote.isPending ? "جارٍ حفظ آخر التعديلات…" : "تتم مزامنة خطتك تلقائيًا وبشكل خاص.") : "تُحفظ خطتك على هذا الجهاز. سجّل الدخول للمزامنة."}</p></div>{isAuthenticated ? <Button variant="outline" onClick={handleLogout}><LogOut size={16}/> تسجيل الخروج</Button> : !loading && <Button onClick={() => window.location.href = "/login"}><LogIn size={16}/>{t.signIn}</Button>}</article><article className="panel settings-card notifications-card"><div className="settings-card-heading"><div><span className="metric-icon blue"><BellRing size={18}/></span><h3>التذكيرات المخصصة</h3></div><span className="permission-pill">{notificationPermission === "granted" ? "إشعارات المتصفح مفعلة" : "داخل الموقع فقط"}</span></div><p>أنشئ تنبيهًا بعنوان ووقت محدد. سيظهر داخل التطبيق، ويمكن إرساله أيضًا كإشعار للمتصفح.</p><div className="notification-form"><input placeholder="عنوان التنبيه *" value={newNotification.title} onChange={e => setNewNotification({...newNotification, title: e.target.value})}/><input placeholder="رسالة قصيرة" value={newNotification.message} onChange={e => setNewNotification({...newNotification, message: e.target.value})}/><input type="time" aria-label="وقت التنبيه" value={newNotification.time} onChange={e => setNewNotification({...newNotification, time: e.target.value})}/><Button onClick={addNotification}><Plus size={15}/> إضافة</Button></div>{notificationPermission !== "granted" && typeof Notification !== "undefined" && <button type="button" className="permission-button" onClick={requestNotificationPermission}><Bell size={15}/> تفعيل إشعارات المتصفح</button>}<div className="notification-list">{state.notifications.length === 0 ? <span className="notification-empty">لا توجد تذكيرات بعد.</span> : state.notifications.map(item => <div className={`notification-row ${item.enabled ? "" : "disabled"}`} key={item.id}><button type="button" className="notification-toggle" onClick={() => update(previous => ({...previous, notifications: previous.notifications.map(row => row.id === item.id ? {...row, enabled: !row.enabled} : row)}))} aria-label="تفعيل أو تعطيل التذكير"><span className="notification-dot"><Bell size={13}/></span></button><div><strong>{item.title}</strong><small>{item.time}{item.message ? ` · ${item.message}` : ""}</small></div><button type="button" className="notification-delete" onClick={() => update(previous => ({...previous, notifications: previous.notifications.filter(row => row.id !== item.id)}))} aria-label="حذف التذكير"><Trash2 size={14}/></button></div>)}</div></article><article className="panel settings-card danger-card"><h3>إعادة الضبط</h3><p>استخدم هذه الخيارات لبدء صفحة جديدة.</p><div><Button variant="outline" onClick={resetToday}>إعادة ضبط اليوم</Button><Button variant="outline" onClick={resetWeek}>إعادة ضبط الأسبوع</Button></div></article></section></div>;
 
-  const renderPage = () => ({ today: TodayPage(), week: WeekPage(), school: SchoolPage(), notes: NotesPage(), stats: StatsPage(), settings: SettingsPage() })[page];
+  const HistoryPage = () => <div className="page-stack"><section className="page-header"><div><div className="eyebrow"><History size={15}/> مراجعة الأيام</div><h1>🗂️ الجداول القديمة</h1><p>شاهد كل يوم سابق وما أنجزته فيه.</p></div><strong className="stat-chip">{state.history.length} يوم محفوظ</strong></section>{state.history.length === 0 ? <section className="panel empty-state history-empty"><div className="empty-icon">🗓️</div><h3>لا توجد أيام قديمة بعد</h3><p>سيظهر جدول اليوم هنا تلقائيًا عند بدء يوم جديد.</p></section> : <section className="history-list">{state.history.map(day => { const done = day.tasks.filter(task => task.done).length; const prayers = Object.values(day.prayers).filter(Boolean).length; return <article className="panel history-card" key={day.id}><div className="history-card-header"><div><h2>{formatAttendanceDate(day.date)}</h2><p>{done} من {day.tasks.length} مهمة مكتملة · {prayers} من 5 صلوات</p></div><span className="history-percent">{day.tasks.length ? Math.round((done / day.tasks.length) * 100) : 0}%</span></div><div className="history-task-grid">{day.tasks.map(task => <div className={`history-task ${task.done ? "done" : ""}`} key={task.id}><span>{task.icon}</span><strong>{task.title}</strong><time>{task.time}</time>{task.done && <Check size={14}/>}</div>)}</div></article>; })}</section>}</div>;
+
+  const renderPage = () => ({ today: TodayPage(), week: WeekPage(), school: SchoolPage(), notes: NotesPage(), stats: StatsPage(), history: HistoryPage(), settings: SettingsPage() })[page];
 
   return <div className={`planner-shell ${state.settings.theme}`} dir={state.settings.language === "ar" ? "rtl" : "ltr"}><>{activeAlert && <div className="notification-alert" role="status"><span className="notification-alert-icon"><BellRing size={18}/></span><div><strong>{activeAlert.title}</strong><p>{activeAlert.message || "حان وقت التذكير"}</p></div><button type="button" onClick={() => setActiveAlert(null)} aria-label="إغلاق التنبيه">×</button></div>}</><aside className="sidebar"><div className="brand"><span className="brand-mark">R</span><div><strong>RONI</strong><small>PLANNER</small></div></div><nav>{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav><div className="sidebar-bottom"><div className="tiny-progress"><span>تقدم اليوم</span><strong>{completion}%</strong><i><b style={{width: `${completion}%`}}/></i></div><div className="profile-line"><span>{user?.name?.slice(0,1).toUpperCase() || "R"}</span><div><strong>{user?.name || "RONI Planner"}</strong><small>{isAuthenticated ? "تمت المزامنة" : "محفوظ على الجهاز"}</small></div></div></div></aside><main className="app-main"><header className="mobile-header"><div className="brand"><span className="brand-mark">R</span><strong>RONI</strong></div><button type="button" onClick={() => changePage("settings")}><Settings2 size={19}/></button></header><div className="content-wrap">{canInstall && <button type="button" className="install-app-button" onClick={installApp}><Download size={16}/> تثبيت التطبيق</button>}{renderPage()}</div></main><nav className="mobile-nav">{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav></div>;
 }
