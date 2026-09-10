@@ -45,6 +45,7 @@ type Note = { id: string; type: "goal" | "idea" | "reminder" | "good"; text: str
 type CustomNotification = { id: string; title: string; message: string; time: string; enabled: boolean; lastTriggered?: string };
 type WeekDay = { id: string; label: string; short: string; progress: number; status: "pending" | "complete" | "missed" };
 type PlannerState = {
+  activeDate: string;
   tasks: Task[];
   prayers: Record<string, boolean>;
   school: SchoolTask[];
@@ -57,6 +58,8 @@ type PlannerState = {
 
 type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
 
+const getLocalDateKey = () => { const date = new Date(); const offset = date.getTimezoneOffset() * 60000; return new Date(date.getTime() - offset).toISOString().slice(0, 10); };
+
 const DEFAULT_TASKS: Task[] = [
   ["08:00", "🌅", "الاستيقاظ"], ["08:15", "🧼", "النظافة الشخصية"], ["08:30", "🍳", "الفطور"],
   ["09:00", "🧹", "تنظيف وترتيب"], ["10:00", "☕", "راحة"], ["10:30", "🎒", "تجهيز المدرسة"],
@@ -67,6 +70,7 @@ const DEFAULT_TASKS: Task[] = [
 ].map(([time, icon, title], index) => ({ id: `routine-${index + 1}`, time, icon, title, done: false }));
 
 const createInitialState = (): PlannerState => ({
+  activeDate: getLocalDateKey(),
   tasks: DEFAULT_TASKS,
   prayers: { "الفجر": false, "الظهر": false, "العصر": false, "المغرب": false, "العشاء": false },
   school: [],
@@ -91,6 +95,15 @@ const createInitialState = (): PlannerState => ({
 });
 
 function formatAttendanceDate(value: string) { return new Intl.DateTimeFormat("ar-EG", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(value + "T12:00:00")); }
+
+function resetDailyProgress(previous: PlannerState, date: string): PlannerState {
+  return {
+    ...previous,
+    activeDate: date,
+    tasks: previous.tasks.map(task => ({ ...task, done: false, lastTriggered: undefined })),
+    prayers: Object.fromEntries(Object.keys(previous.prayers).map(key => [key, false])),
+  };
+}
 
 function playNotificationSound(sound: NotificationSound) {
   if (sound === "silent") return;
@@ -150,7 +163,8 @@ export default function Home() {
       if (!saved) return createInitialState();
       const parsed = JSON.parse(saved) as Partial<PlannerState>;
       const defaults = createInitialState();
-      return { ...defaults, ...parsed, notifications: parsed.notifications ?? [], attendance: parsed.attendance ?? [], settings: { ...defaults.settings, ...(parsed.settings ?? {}) } };
+      const loaded = { ...defaults, ...parsed, notifications: parsed.notifications ?? [], attendance: parsed.attendance ?? [], settings: { ...defaults.settings, ...(parsed.settings ?? {}) } };
+      return loaded.activeDate !== defaults.activeDate ? resetDailyProgress(loaded, defaults.activeDate) : loaded;
     } catch { return createInitialState(); }
   });
   const [remoteReady, setRemoteReady] = useState(false);
@@ -159,7 +173,7 @@ export default function Home() {
   const [newTask, setNewTask] = useState({ time: "", title: "", icon: "✨" });
   const [addingSchool, setAddingSchool] = useState(false);
   const [newSchool, setNewSchool] = useState({ subject: "", task: "", recitation: "", homework: "", details: "", due: "" });
-  const [attendanceDate, setAttendanceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [attendanceDate, setAttendanceDate] = useState(() => getLocalDateKey());
   const [attendanceNote, setAttendanceNote] = useState("");
   const [newNotification, setNewNotification] = useState({ title: "", message: "", time: "" });
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(typeof Notification === "undefined" ? "denied" : Notification.permission);
@@ -195,9 +209,18 @@ export default function Home() {
   useEffect(() => {
     if (!isAuthenticated) { setRemoteReady(true); return; }
     if (!remote.isFetched) return;
-    if (remote.data?.data) { try { const parsed = JSON.parse(remote.data.data) as Partial<PlannerState>; setState(previous => ({ ...previous, ...parsed, notifications: parsed.notifications ?? previous.notifications ?? [], settings: { ...previous.settings, ...(parsed.settings ?? {}) } })); } catch { /* retain local data if a stale document is malformed */ } }
+    if (remote.data?.data) { try { const parsed = JSON.parse(remote.data.data) as Partial<PlannerState>; setState(previous => { const todayKey = getLocalDateKey(); const loaded = { ...previous, ...parsed, notifications: parsed.notifications ?? previous.notifications ?? [], attendance: parsed.attendance ?? previous.attendance ?? [], settings: { ...previous.settings, ...(parsed.settings ?? {}) } }; return loaded.activeDate !== todayKey ? resetDailyProgress(loaded, todayKey) : loaded; }); } catch { /* retain local data if a stale document is malformed */ } }
     setRemoteReady(true);
   }, [isAuthenticated, remote.isFetched, remote.data?.data]);
+  useEffect(() => {
+    const checkNewDay = () => {
+      const date = getLocalDateKey();
+      setState(previous => previous.activeDate === date ? previous : resetDailyProgress(previous, date));
+    };
+    checkNewDay();
+    const timer = window.setInterval(checkNewDay, 30000);
+    return () => window.clearInterval(timer);
+  }, []);
   useEffect(() => {
     if (!isAuthenticated || !remoteReady) return;
     const timer = window.setTimeout(() => saveRemote.mutate({ data: JSON.stringify(state) }), 900);
@@ -207,7 +230,7 @@ export default function Home() {
   useEffect(() => {
     const checkReminders = () => {
       const now = new Date();
-      const todayKey = now.toISOString().slice(0, 10);
+      const todayKey = getLocalDateKey();
       const currentTime = now.toTimeString().slice(0, 5);
       const dueCustom = state.notifications.find(item => item.enabled && item.time === currentTime && item.lastTriggered !== todayKey);
       const dueTask = state.settings.taskReminders !== false && state.tasks.find(item => !item.done && getReminderTime(item.time) === currentTime && item.lastTriggered !== todayKey);
