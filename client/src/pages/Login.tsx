@@ -1,9 +1,16 @@
 import { LogIn, Mail, ShieldCheck } from "lucide-react";
 import { startLogin } from "@/const";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { useEffect } from "react";
 
 const LOGO_URL = "/manus-storage/pasted_file_YYT9iG_image_fa68451c.png";
 
 export default function Login() {
+  const { isAuthenticated, loading } = useAuth();
+  useEffect(() => {
+    if (!loading && isAuthenticated) window.location.replace("/");
+  }, [isAuthenticated, loading]);
+
   return (
     <main className="login-page" dir="rtl">
       <section className="login-card" aria-labelledby="login-title">
