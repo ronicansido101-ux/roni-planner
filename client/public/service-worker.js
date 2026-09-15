@@ -35,8 +35,12 @@ self.addEventListener("fetch", event => {
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
       }
       return response;
-    }).catch(() => caches.match("/")))
+    }).catch(() => event.request.mode === "navigate" ? caches.match("/") : caches.match(event.request)))
   );
+});
+
+self.addEventListener("message", event => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("push", event => {

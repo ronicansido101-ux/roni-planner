@@ -9,9 +9,12 @@ import { startLogin } from "./const";
 import "./index.css";
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js", { scope: "/" }).catch(error => console.warn("[PWA] Service worker registration failed", error));
-  });
+  navigator.serviceWorker.register("/service-worker.js", { scope: "/" })
+    .then(registration => {
+      console.info("[PWA] Service worker registered", registration.scope);
+      registration.update().catch(() => undefined);
+    })
+    .catch(error => console.warn("[PWA] Service worker registration failed", error));
 }
 
 const queryClient = new QueryClient();
