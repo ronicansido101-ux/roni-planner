@@ -229,6 +229,22 @@ export default function Home() {
 
   useEffect(() => { document.documentElement.dir = state.settings.language === "ar" ? "rtl" : "ltr"; document.documentElement.lang = state.settings.language === "ar" ? "ar" : state.settings.language; }, [state.settings.language]);
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const isShared = params.get("share") === "1";
+    const isNewNote = params.get("new-note") === "1";
+    if (!isShared && !isNewNote) return;
+    const title = params.get("title")?.trim();
+    const text = params.get("text")?.trim();
+    const sharedUrl = params.get("url")?.trim();
+    const content = [title, text, sharedUrl].filter(Boolean).join("\n");
+    update(previous => ({
+      ...previous,
+      notes: [...previous.notes, { id: `note-${Date.now()}`, type: isShared ? "idea" : "reminder", text: content || "ملاحظة جديدة..." }],
+    }));
+    setPage("notes");
+    window.history.replaceState({}, "", "/");
+  }, []);
+  useEffect(() => {
     const standalone = window.matchMedia("(display-mode: standalone)").matches || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
     if (standalone) return;
     const onInstallPrompt = (event: Event) => { event.preventDefault(); installPrompt.current = event as InstallPromptEvent; setCanInstall(true); };
