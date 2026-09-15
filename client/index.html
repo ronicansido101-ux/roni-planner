@@ -12,6 +12,13 @@
     <link rel="icon" href="/roni-icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="192x192" href="/roni-icon-192.png" />
     <title>RONI Planner</title>
+    <script>
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/service-worker.js", { scope: "/" })
+          .then(function (registration) { return registration.update(); })
+          .catch(function (error) { console.warn("[PWA] Early service worker registration failed", error); });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
