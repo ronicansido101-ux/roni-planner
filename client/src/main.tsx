@@ -10,7 +10,7 @@ import "./index.css";
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(error => console.warn("[PWA] Service worker registration failed", error));
+    navigator.serviceWorker.register("/service-worker.js", { scope: "/" }).catch(error => console.warn("[PWA] Service worker registration failed", error));
   });
 }
 
