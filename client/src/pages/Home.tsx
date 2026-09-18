@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type Page = "today" | "week" | "school" | "notes" | "stats" | "settings" | "history";
+type Page = "today" | "week" | "school" | "notes" | "stats" | "settings" | "history" | "muslim";
 type Language = "ar" | "tr" | "en";
 type NotificationSound = "soft" | "bell" | "digital" | "silent";
 type TaskColor = "blue" | "pink" | "white" | "green" | "orange";
@@ -62,7 +62,10 @@ type PlannerState = {
 };
 
 type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
+type PrayerName = "الفجر" | "الظهر" | "العصر" | "المغرب" | "العشاء";
+type PrayerTimes = Record<PrayerName, string>;
 
+const DEFAULT_PRAYER_TIMES: PrayerTimes = { "الفجر": "04:30", "الظهر": "12:15", "العصر": "15:45", "المغرب": "18:20", "العشاء": "19:45" };
 const getLocalDateKey = () => { const date = new Date(); const offset = date.getTimezoneOffset() * 60000; return new Date(date.getTime() - offset).toISOString().slice(0, 10); };
 
 const DEFAULT_TASKS: Task[] = [
@@ -153,13 +156,13 @@ function openSystemAlarm(title: string, time: string) {
 }
 
 const copy = {
-  ar: { today: "اليوم", week: "الأسبوع", school: "المدرسة", notes: "الملاحظات", stats: "الإحصائيات", settings: "الإعدادات", history: "السجل القديم", greeting: "صباح الخير", add: "إضافة مهمة", remaining: "متبقية", complete: "مكتملة", insight: "تحليل نهاية اليوم", cloud: "الحفظ السحابي", signIn: "تسجيل الدخول", addSchool: "إضافة مادة", save: "حفظ" },
-  tr: { today: "Bugün", week: "Hafta", school: "Okul", notes: "Notlar", stats: "İstatistikler", settings: "Ayarlar", history: "Geçmiş", greeting: "Günaydın", add: "Görev ekle", remaining: "kalan", complete: "tamam", insight: "Gün sonu analizi", cloud: "Bulut kaydı", signIn: "Giriş yap", addSchool: "Ders ekle", save: "Kaydet" },
-  en: { today: "Today", week: "Week", school: "School", notes: "Notes", stats: "Statistics", settings: "Settings", history: "History", greeting: "Good morning", add: "Add task", remaining: "remaining", complete: "complete", insight: "End-of-day review", cloud: "Cloud save", signIn: "Sign in", addSchool: "Add subject", save: "Save" },
+  ar: { muslim: "مسلم", today: "اليوم", week: "الأسبوع", school: "المدرسة", notes: "الملاحظات", stats: "الإحصائيات", settings: "الإعدادات", history: "السجل القديم", greeting: "صباح الخير", add: "إضافة مهمة", remaining: "متبقية", complete: "مكتملة", insight: "تحليل نهاية اليوم", cloud: "الحفظ السحابي", signIn: "تسجيل الدخول", addSchool: "إضافة مادة", save: "حفظ" },
+  tr: { muslim: "Müslüman", today: "Bugün", week: "Hafta", school: "Okul", notes: "Notlar", stats: "İstatistikler", settings: "Ayarlar", history: "Geçmiş", greeting: "Günaydın", add: "Görev ekle", remaining: "kalan", complete: "tamam", insight: "Gün sonu analizi", cloud: "Bulut kaydı", signIn: "Giriş yap", addSchool: "Ders ekle", save: "Kaydet" },
+  en: { muslim: "Muslim", today: "Today", week: "Week", school: "School", notes: "Notes", stats: "Statistics", settings: "Settings", history: "History", greeting: "Good morning", add: "Add task", remaining: "remaining", complete: "complete", insight: "End-of-day review", cloud: "Cloud save", signIn: "Sign in", addSchool: "Add subject", save: "Save" },
 };
 
 const navItems = [
-  { id: "today" as Page, icon: ListTodo, key: "today" }, { id: "week" as Page, icon: CalendarDays, key: "week" },
+  { id: "today" as Page, icon: ListTodo, key: "today" }, { id: "muslim" as Page, icon: Heart, key: "muslim" }, { id: "week" as Page, icon: CalendarDays, key: "week" },
   { id: "school" as Page, icon: GraduationCap, key: "school" }, { id: "notes" as Page, icon: StickyNote, key: "notes" },
   { id: "stats" as Page, icon: BarChart3, key: "stats" }, { id: "history" as Page, icon: History, key: "history" }, { id: "settings" as Page, icon: Settings2, key: "settings" },
 ];
@@ -178,6 +181,9 @@ function SectionTitle({ icon: Icon, title, action }: { icon: typeof ListTodo; ti
 export default function Home() {
   const { user, isAuthenticated, loading, logout } = useAuth();
   const [page, setPage] = useState<Page>("today");
+  const [prayerTimes, setPrayerTimes] = useState<PrayerTimes>(DEFAULT_PRAYER_TIMES);
+  const [prayerTimesSource, setPrayerTimesSource] = useState("أوقات تقريبية قابلة للتحديث");
+  const [adhkarCounts, setAdhkarCounts] = useState<Record<string, number>>({});
   const [selectedHistoryDate, setSelectedHistoryDate] = useState(() => getLocalDateKey());
   const [historyDraft, setHistoryDraft] = useState<DayHistory | null>(null);
   const [state, setState] = useState<PlannerState>(() => {
@@ -240,6 +246,19 @@ export default function Home() {
   };
 
   useEffect(() => { document.documentElement.dir = state.settings.language === "ar" ? "rtl" : "ltr"; document.documentElement.lang = state.settings.language === "ar" ? "ar" : state.settings.language; }, [state.settings.language]);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("https://api.aladhan.com/v1/timingsByCity?city=Damascus&country=Syria&method=4", { signal: controller.signal })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error("prayer-times")))
+      .then(payload => {
+        const timings = payload?.data?.timings;
+        if (!timings) return;
+        setPrayerTimes({ "الفجر": timings.Fajr?.slice(0, 5) || DEFAULT_PRAYER_TIMES["الفجر"], "الظهر": timings.Dhuhr?.slice(0, 5) || DEFAULT_PRAYER_TIMES["الظهر"], "العصر": timings.Asr?.slice(0, 5) || DEFAULT_PRAYER_TIMES["العصر"], "المغرب": timings.Maghrib?.slice(0, 5) || DEFAULT_PRAYER_TIMES["المغرب"], "العشاء": timings.Isha?.slice(0, 5) || DEFAULT_PRAYER_TIMES["العشاء"] });
+        setPrayerTimesSource("أوقات دمشق من خدمة الأذان اليومية");
+      })
+      .catch(() => setPrayerTimesSource("أوقات تقريبية؛ لا يوجد اتصال بخدمة الأذان"));
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const isShared = params.get("share") === "1";
@@ -315,6 +334,11 @@ export default function Home() {
   }, [state.notifications, state.tasks, state.settings.taskReminders, state.settings.notificationSound, notificationPermission]);
 
   const update = (fn: (previous: PlannerState) => PlannerState) => setState(fn);
+  const canLogPrayer = (prayer: PrayerName) => prayerTimes[prayer] <= new Date().toTimeString().slice(0, 5);
+  const togglePrayer = (prayer: PrayerName) => {
+    if (!canLogPrayer(prayer)) { window.alert(`لم يؤذن بعد لصلاة ${prayer}. وقت الأذان: ${prayerTimes[prayer]}`); return; }
+    update(previous => ({ ...previous, prayers: { ...previous.prayers, [prayer]: !previous.prayers[prayer] } }));
+  };
   const handleLogout = async () => { if (!window.confirm("هل تريد تسجيل الخروج؟")) return; await logout(); window.location.href = "/login"; };
   const changePage = (nextPage: Page) => {
     setPage(nextPage);
@@ -335,6 +359,16 @@ export default function Home() {
   const resetToday = () => { if (window.confirm("هل تريد إعادة ضبط بيانات اليوم؟")) update(previous => ({ ...previous, tasks: previous.tasks.map(task => ({ ...task, done: false })), prayers: Object.fromEntries(Object.keys(previous.prayers).map(key => [key, false])), school: previous.school.map(item => ({ ...item, done: false })) })); };
   const resetWeek = () => { if (window.confirm("هل تريد إعادة ضبط الأسبوع؟")) update(previous => ({ ...previous, week: previous.week.map(day => ({ ...day, progress: 0, status: "pending" })) })); };
 
+  const MuslimPage = () => {
+    const adhkar = [
+      { id: "morning", title: "أذكار الصباح", text: "أصبحنا وأصبح الملك لله والحمد لله", target: 1 },
+      { id: "evening", title: "أذكار المساء", text: "أمسينا وأمسى الملك لله والحمد لله", target: 1 },
+      { id: "forgiveness", title: "الاستغفار", text: "أستغفر الله وأتوب إليه", target: 100 },
+      { id: "praise", title: "التسبيح", text: "سبحان الله وبحمده", target: 100 },
+    ];
+    return <div className="page-stack"><section className="page-header"><div><div className="eyebrow"><Heart size={15}/> عبادتك وطمأنينتك</div><h1>🕌 مسلم</h1><p>تابع أوقات الأذان، سجّل صلاتك بعد دخول وقتها، وابدأ أذكارك اليومية.</p></div></section><section className="panel muslim-times-panel"><div className="section-title"><div className="section-heading"><span className="icon-surface"><Clock3 size={18}/></span><div><h2>مواقيت الصلاة</h2><p className="section-subtitle">{prayerTimesSource}</p></div></div><span className="permission-pill">اليوم {today}</span></div><div className="muslim-prayer-grid">{(Object.keys(prayerTimes) as PrayerName[]).map(prayer => { const reached = canLogPrayer(prayer); const done = state.prayers[prayer]; return <article className={`muslim-prayer-card ${done ? "is-done" : ""}`} key={prayer}><div><strong>{prayer}</strong><time>{prayerTimes[prayer]}</time></div><button type="button" disabled={!reached} onClick={() => togglePrayer(prayer)}>{done ? "تمت الصلاة ✓" : reached ? "تسجيل الصلاة" : "لم يؤذن بعد"}</button></article>; })}</div></section><section className="panel adhkar-panel"><SectionTitle icon={Heart} title="الأذكار اليومية" action={<span className="stat-chip">{Object.values(adhkarCounts).reduce((sum, count) => sum + count, 0)} تسبيحة</span>} /><div className="adhkar-grid">{adhkar.map(item => { const count = adhkarCounts[item.id] || 0; return <article className="adhkar-card" key={item.id}><span className="adhkar-icon">🤲</span><div><h3>{item.title}</h3><p>{item.text}</p><small>{count} / {item.target}</small></div><button type="button" onClick={() => setAdhkarCounts(previous => ({ ...previous, [item.id]: Math.min(item.target, (previous[item.id] || 0) + 1) }))} disabled={count >= item.target}>+1</button></article>; })}</div></section></div>;
+  };
+
   const TodayPage = () => <>
     <section className="hero-card"><div className="hero-orbit orbit-one"/><div className="hero-orbit orbit-two"/><div className="hero-copy"><div className="eyebrow"><Sun size={15} /> {today}</div><h1>{t.greeting} <span>👋</span></h1><p>خطّط ليومك بهدوء، وأنجز ما يهمك خطوة بخطوة.</p><div className="hero-metrics"><div><strong>{taskDone}</strong><span>{t.complete}</span></div><i/><div><strong>{state.tasks.length - taskDone}</strong><span>{t.remaining}</span></div></div></div><ProgressRing value={completion} /></section>
     <div className="dashboard-grid"><div className="main-column"><section className="panel task-panel"><SectionTitle icon={ListTodo} title="جدول اليوم" action={<div className="schedule-actions"><Button type="button" onClick={() => setEditingSchedule(!editingSchedule)} className="schedule-edit-button">{editingSchedule ? "حفظ الجدول" : "تعديل الجدول"}</Button><Button type="button" onClick={() => setAddingTask(!addingTask)} className="accent-button"><Plus size={16} /> {t.add}</Button></div>} />
@@ -344,7 +378,7 @@ export default function Home() {
     <div className="lower-grid">{SchoolPreview()}{InsightPanel()}</div>
   </>;
 
-  const PrayerPanel = () => <section className="panel prayer-panel"><SectionTitle icon={Moon} title="الصلوات" /><p className="section-subtitle">خمس محطات للهدوء خلال اليوم</p><div className="prayer-list">{Object.entries(state.prayers).map(([prayer, done]) => <label className={`prayer-row ${done ? "is-done" : ""}`} key={prayer}><input type="checkbox" checked={done} onChange={() => update(previous => ({ ...previous, prayers: { ...previous.prayers, [prayer]: !previous.prayers[prayer] } }))} /><span className="prayer-box"><Check size={13} /></span><span>{prayer}</span>{done && <Check className="prayer-check" size={15}/>}</label>)}</div><div className="prayer-footer"><span>المكتمل</span><strong>{prayerDone} / 5</strong></div></section>;
+  const PrayerPanel = () => <section className="panel prayer-panel"><SectionTitle icon={Moon} title="الصلوات" /><p className="section-subtitle">تسجيل الصلاة يصبح متاحًا بعد الأذان</p><div className="prayer-list">{(Object.keys(state.prayers) as PrayerName[]).map(prayer => { const done = state.prayers[prayer]; const reached = canLogPrayer(prayer); return <label className={`prayer-row ${done ? "is-done" : ""}`} key={prayer}><input type="checkbox" checked={done} disabled={!reached} onChange={() => togglePrayer(prayer)} /><span className="prayer-box"><Check size={13} /></span><span>{prayer}<small className="prayer-time-hint">{reached ? prayerTimes[prayer] : `لم يؤذن بعد · ${prayerTimes[prayer]}`}</small></span>{done && <Check className="prayer-check" size={15}/>}</label>; })}</div><div className="prayer-footer"><span>المكتمل</span><strong>{prayerDone} / 5</strong></div></section>;
 
   const SchoolPreview = () => <section className="panel compact-panel"><SectionTitle icon={BookOpen} title="مهام المدرسة" action={<button type="button" className="ghost-action" onClick={() => changePage("school")}>عرض الكل <ChevronLeft size={15}/></button>} /><div className="mini-school"><div className="mini-count"><GraduationCap size={20}/><strong>{state.school.length}</strong><span>مواد / مهام</span></div><div><strong>{schoolDone} مكتملة</strong><p>أضف المواد، التسميع، والواجبات من صفحة المدرسة.</p></div></div></section>;
 
@@ -362,7 +396,7 @@ export default function Home() {
 
   const HistoryPage = () => <div className="page-stack"><section className="page-header"><div><div className="eyebrow"><History size={15}/> تقويم الإنجاز</div><h1>🗓️ سجل أي يوم</h1><p>اختر أي تاريخ سابق، حتى لو لم تفتح التطبيق فيه، وسجّل علامات الصح يدويًا.</p></div><strong className="stat-chip">{state.history.length} يوم محفوظ</strong></section><section className="panel history-picker"><label>اختر التاريخ <input type="date" max={getLocalDateKey()} value={selectedHistoryDate} onChange={e => openHistoryDate(e.target.value)} /></label><Button type="button" onClick={saveHistoryDraft} disabled={!historyDraft}>حفظ جدول هذا اليوم</Button><Button type="button" variant="outline" disabled={!historyDraft} onClick={applyHistoryDay}><History size={16}/> تطبيق الصح على جدول اليوم</Button><p>مثال: اختر 2026-09-08 ثم علّم المهام التي أنجزتها في ذلك اليوم. يمكنك تعديل أي تاريخ سابق حتى لو لم يكن محفوظًا.</p></section>{historyDraft && <section className="panel history-editor"><div className="history-editor-title"><h2>{formatAttendanceDate(historyDraft.date)}</h2><span>اضغط على المربعات لإضافة أو إزالة الصح</span></div><div className="history-edit-grid">{historyDraft.tasks.map(task => <label className={`history-edit-task ${task.done ? "done" : ""}`} key={task.id}><input type="checkbox" checked={task.done} onChange={e => setHistoryDraft(previous => previous ? { ...previous, tasks: previous.tasks.map(item => item.id === task.id ? { ...item, done: e.target.checked } : item) } : previous)} /><span>{task.icon}</span><strong>{task.title}</strong><time>{task.time}</time></label>)}</div><div className="history-prayer-edit"><strong>الصلوات</strong>{Object.entries(historyDraft.prayers).map(([prayer, done]) => <label key={prayer}><input type="checkbox" checked={done} onChange={e => setHistoryDraft(previous => previous ? { ...previous, prayers: { ...previous.prayers, [prayer]: e.target.checked } } : previous)} />{prayer}</label>)}</div></section>}{state.history.length === 0 ? <section className="panel empty-state history-empty"><div className="empty-icon">🗓️</div><h3>ابدأ باختيار أي تاريخ</h3><p>لا تحتاج إلى انتظار مرور اليوم؛ يمكنك تسجيل الأيام السابقة يدويًا.</p></section> : <section className="history-list">{state.history.map(day => { const done = day.tasks.filter(task => task.done).length; const prayers = Object.values(day.prayers).filter(Boolean).length; return <article className="panel history-card" key={day.id} onClick={() => openHistoryDate(day.date)}><div className="history-card-header"><div><h2>{formatAttendanceDate(day.date)}</h2><p>{done} من {day.tasks.length} مهمة مكتملة · {prayers} من 5 صلوات</p></div><span className="history-percent">{day.tasks.length ? Math.round((done / day.tasks.length) * 100) : 0}%</span></div></article>; })}</section>}</div>;
 
-  const renderPage = () => ({ today: TodayPage(), week: WeekPage(), school: SchoolPage(), notes: NotesPage(), stats: StatsPage(), history: HistoryPage(), settings: SettingsPage() })[page];
+  const renderPage = () => ({ today: TodayPage(), muslim: MuslimPage(), week: WeekPage(), school: SchoolPage(), notes: NotesPage(), stats: StatsPage(), history: HistoryPage(), settings: SettingsPage() })[page];
 
   return <div className={`planner-shell ${state.settings.theme}`} dir={state.settings.language === "ar" ? "rtl" : "ltr"}><>{activeAlert && <div className="notification-alert" role="status"><span className="notification-alert-icon"><BellRing size={18}/></span><div><strong>{activeAlert.title}</strong><p>{activeAlert.message || "حان وقت التذكير"}</p></div><button type="button" onClick={() => setActiveAlert(null)} aria-label="إغلاق التنبيه">×</button></div>}</><aside className="sidebar"><div className="brand"><span className="brand-mark">R</span><div><strong>RONI</strong><small>PLANNER</small></div></div><nav>{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav><div className="sidebar-bottom"><div className="tiny-progress"><span>تقدم اليوم</span><strong>{completion}%</strong><i><b style={{width: `${completion}%`}}/></i></div><div className="profile-line"><span>{user?.name?.slice(0,1).toUpperCase() || "R"}</span><div><strong>{user?.name || "RONI Planner"}</strong><small>{isAuthenticated ? "تمت المزامنة" : "محفوظ على الجهاز"}</small></div></div></div></aside><main className="app-main"><header className="mobile-header"><div className="brand"><span className="brand-mark">R</span><strong>RONI</strong></div><button type="button" onClick={() => changePage("settings")}><Settings2 size={19}/></button></header><div className="content-wrap">{canInstall && <button type="button" className="install-app-button" onClick={installApp}><Download size={16}/> تثبيت التطبيق</button>}{renderPage()}</div></main><nav className="mobile-nav">{navItems.map(item => { const Icon = item.icon; return <button type="button" key={item.id} className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => changePage(item.id)}><Icon size={18}/><span>{t[item.key as keyof typeof t]}</span></button>; })}</nav></div>;
 }
