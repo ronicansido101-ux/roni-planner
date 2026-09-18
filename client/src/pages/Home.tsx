@@ -58,6 +58,8 @@ type PlannerState = {
   notes: Note[];
   notifications: CustomNotification[];
   week: WeekDay[];
+  adhkarCounts: Record<string, number>;
+  worshipHistory: WorshipHistoryEntry[];
   settings: { language: Language; theme: AppTheme; prayerCity: string; prayerMethod: PrayerMethod; prayerAlerts: boolean; wake: string; sleep: string; school: string; taskReminders: boolean; notificationSound: NotificationSound };
 };
 
@@ -65,6 +67,8 @@ type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Pro
 type PrayerName = "الفجر" | "الظهر" | "العصر" | "المغرب" | "العشاء";
 type PrayerTimes = Record<PrayerName, string>;
 type PrayerMethod = 2 | 3 | 4 | 5;
+type AdhkarCategory = "morning" | "evening" | "sleep" | "travel";
+type WorshipHistoryEntry = { date: string; prayers: Record<string, boolean>; adhkarCounts: Record<string, number> };
 type PrayerCity = { id: string; label: string; city: string; country: string; latitude: number; longitude: number };
 const PRAYER_CITIES: PrayerCity[] = [
   { id: "damascus", label: "دمشق", city: "Damascus", country: "Syria", latitude: 33.5138, longitude: 36.2765 },
@@ -99,6 +103,8 @@ const createInitialState = (): PlannerState => ({
     { id: "note-good", type: "good", text: "ما الشيء الجميل الذي حدث اليوم؟" },
   ],
   notifications: [],
+  adhkarCounts: {},
+  worshipHistory: [],
   week: [
     { id: "sat", label: "السبت", short: "س", progress: 58, status: "complete" },
     { id: "sun", label: "الأحد", short: "ح", progress: 72, status: "complete" },
@@ -121,6 +127,8 @@ function resetDailyProgress(previous: PlannerState, date: string): PlannerState 
     ...previous,
     activeDate: date,
     history: historyEntry ? [historyEntry, ...previous.history].slice(0, 90) : previous.history,
+    worshipHistory: previous.activeDate && previous.activeDate !== date && !previous.worshipHistory.some(item => item.date === previous.activeDate) ? [{ date: previous.activeDate, prayers: { ...previous.prayers }, adhkarCounts: { ...previous.adhkarCounts } }, ...previous.worshipHistory].slice(0, 90) : previous.worshipHistory,
+    adhkarCounts: {},
     tasks: previous.tasks.map(task => ({ ...task, done: false, lastTriggered: undefined })),
     prayers: Object.fromEntries(Object.keys(previous.prayers).map(key => [key, false])),
   };
@@ -237,6 +245,15 @@ export default function Home() {
     return { ...selected, remaining };
   }, [clock, prayerTimes]);
   const countdown = `${String(Math.floor(nextPrayer.remaining / 3600000)).padStart(2, "0")}:${String(Math.floor((nextPrayer.remaining % 3600000) / 60000)).padStart(2, "0")}:${String(Math.floor((nextPrayer.remaining % 60000) / 1000)).padStart(2, "0")}`;
+  const qiblaBearing = useMemo(() => {
+    const kaabaLat = 21.4225 * Math.PI / 180;
+    const kaabaLon = 39.8262 * Math.PI / 180;
+    const lat = currentCity.latitude * Math.PI / 180;
+    const lon = currentCity.longitude * Math.PI / 180;
+    const bearing = Math.atan2(Math.sin(kaabaLon - lon), Math.cos(lat) * Math.tan(kaabaLat) - Math.sin(lat) * Math.cos(kaabaLon - lon)) * 180 / Math.PI;
+    return Math.round((bearing + 360) % 360);
+  }, [currentCity]);
+  const qiblaDirection = qiblaBearing < 22.5 || qiblaBearing >= 337.5 ? "الشمال" : qiblaBearing < 67.5 ? "الشمال الشرقي" : qiblaBearing < 112.5 ? "الشرق" : qiblaBearing < 157.5 ? "الجنوب الشرقي" : qiblaBearing < 202.5 ? "الجنوب" : qiblaBearing < 247.5 ? "الجنوب الغربي" : qiblaBearing < 292.5 ? "الغرب" : "الشمال الغربي";
   const taskDone = state.tasks.filter(task => task.done).length;
   const prayerDone = Object.values(state.prayers).filter(Boolean).length;
   const schoolDone = state.school.filter(item => item.done).length;
@@ -316,7 +333,7 @@ export default function Home() {
   useEffect(() => {
     if (!isAuthenticated) { setRemoteReady(true); return; }
     if (!remote.isFetched) return;
-    if (remote.data?.data) { try { const parsed = JSON.parse(remote.data.data) as Partial<PlannerState>; setState(previous => { const todayKey = getLocalDateKey(); const loaded = { ...previous, ...parsed, history: parsed.history ?? previous.history ?? [], notifications: parsed.notifications ?? previous.notifications ?? [], attendance: parsed.attendance ?? previous.attendance ?? [], settings: { ...previous.settings, ...(parsed.settings ?? {}) } }; return loaded.activeDate !== todayKey ? resetDailyProgress(loaded, todayKey) : loaded; }); } catch { /* retain local data if a stale document is malformed */ } }
+    if (remote.data?.data) { try { const parsed = JSON.parse(remote.data.data) as Partial<PlannerState>; setState(previous => { const todayKey = getLocalDateKey(); const loaded = { ...previous, ...parsed, history: parsed.history ?? previous.history ?? [], worshipHistory: parsed.worshipHistory ?? previous.worshipHistory ?? [], adhkarCounts: parsed.adhkarCounts ?? previous.adhkarCounts ?? {}, notifications: parsed.notifications ?? previous.notifications ?? [], attendance: parsed.attendance ?? previous.attendance ?? [], settings: { ...previous.settings, ...(parsed.settings ?? {}) } }; return loaded.activeDate !== todayKey ? resetDailyProgress(loaded, todayKey) : loaded; }); } catch { /* retain local data if a stale document is malformed */ } }
     setRemoteReady(true);
   }, [isAuthenticated, remote.isFetched, remote.data?.data]);
   useEffect(() => {
@@ -365,7 +382,11 @@ export default function Home() {
   const canLogPrayer = (prayer: PrayerName) => prayerTimes[prayer] <= new Date().toTimeString().slice(0, 5);
   const togglePrayer = (prayer: PrayerName) => {
     if (!canLogPrayer(prayer)) { window.alert(`لم يؤذن بعد لصلاة ${prayer}. وقت الأذان: ${prayerTimes[prayer]}`); return; }
-    update(previous => ({ ...previous, prayers: { ...previous.prayers, [prayer]: !previous.prayers[prayer] } }));
+    update(previous => {
+      const prayers = { ...previous.prayers, [prayer]: !previous.prayers[prayer] };
+      const entry = { date: previous.activeDate, prayers, adhkarCounts: { ...previous.adhkarCounts } };
+      return { ...previous, prayers, worshipHistory: [entry, ...previous.worshipHistory.filter(item => item.date !== previous.activeDate)].slice(0, 90) };
+    });
   };
   const handleLogout = async () => { if (!window.confirm("هل تريد تسجيل الخروج؟")) return; await logout(); window.location.href = "/login"; };
   const changePage = (nextPage: Page) => {
@@ -405,13 +426,17 @@ export default function Home() {
   const resetWeek = () => { if (window.confirm("هل تريد إعادة ضبط الأسبوع؟")) update(previous => ({ ...previous, week: previous.week.map(day => ({ ...day, progress: 0, status: "pending" })) })); };
 
   const MuslimPage = () => {
-    const adhkar = [
-      { id: "morning", title: "أذكار الصباح", text: "أصبحنا وأصبح الملك لله والحمد لله", target: 1 },
-      { id: "evening", title: "أذكار المساء", text: "أمسينا وأمسى الملك لله والحمد لله", target: 1 },
-      { id: "forgiveness", title: "الاستغفار", text: "أستغفر الله وأتوب إليه", target: 100 },
-      { id: "praise", title: "التسبيح", text: "سبحان الله وبحمده", target: 100 },
-    ];
-    return <div className="page-stack"><section className="page-header"><div><div className="eyebrow"><Heart size={15}/> عبادتك وطمأنينتك</div><h1>🕌 مسلم</h1><p>تابع أوقات الأذان، سجّل صلاتك بعد دخول وقتها، وابدأ أذكارك اليومية.</p></div></section><section className="panel muslim-times-panel"><div className="section-title"><div className="section-heading"><span className="icon-surface"><Clock3 size={18}/></span><div><h2>مواقيت الصلاة</h2><p className="section-subtitle">{prayerTimesSource}</p></div></div><span className="permission-pill">اليوم {today}</span></div><div className="prayer-controls"><label>المدينة<select value={currentCity.id} onChange={event => update(previous => ({ ...previous, settings: { ...previous.settings, prayerCity: event.target.value } }))}>{PRAYER_CITIES.map(city => <option value={city.id} key={city.id}>{city.label}</option>)}</select></label><button type="button" onClick={useMyLocation}>استخدم موقعي</button><div className="next-prayer-countdown"><span>الصلاة القادمة: {nextPrayer.name}</span><strong>{countdown}</strong></div></div><div className="muslim-prayer-grid">{(Object.keys(prayerTimes) as PrayerName[]).map(prayer => { const reached = canLogPrayer(prayer); const done = state.prayers[prayer]; return <article className={`muslim-prayer-card ${done ? "is-done" : ""}`} key={prayer}><div><strong>{prayer}</strong><time>{prayerTimes[prayer]}</time></div><button type="button" disabled={!reached} onClick={() => togglePrayer(prayer)}>{done ? "تمت الصلاة ✓" : reached ? "تسجيل الصلاة" : "لم يؤذن بعد"}</button></article>; })}</div></section><section className="panel adhkar-panel"><SectionTitle icon={Heart} title="الأذكار اليومية" action={<span className="stat-chip">{Object.values(adhkarCounts).reduce((sum, count) => sum + count, 0)} تسبيحة</span>} /><div className="adhkar-grid">{adhkar.map(item => { const count = adhkarCounts[item.id] || 0; return <article className="adhkar-card" key={item.id}><span className="adhkar-icon">🤲</span><div><h3>{item.title}</h3><p>{item.text}</p><small>{count} / {item.target}</small></div><button type="button" onClick={() => setAdhkarCounts(previous => ({ ...previous, [item.id]: Math.min(item.target, (previous[item.id] || 0) + 1) }))} disabled={count >= item.target}>+1</button></article>; })}</div></section></div>;
+    const [adhkarCategory, setAdhkarCategory] = useState<AdhkarCategory>("morning");
+    const adhkarByCategory: Record<AdhkarCategory, { title: string; intro: string; items: { id: string; text: string; target: number }[] }> = {
+      morning: { title: "أذكار الصباح", intro: "تُقال بعد الفجر أو في بداية يومك.", items: [{ id: "morning-ayat", text: "آية الكرسي", target: 1 }, { id: "morning-praise", text: "رضيت بالله ربًا وبالإسلام دينًا وبمحمد ﷺ نبيًا", target: 3 }, { id: "morning-protection", text: "بسم الله الذي لا يضر مع اسمه شيء في الأرض ولا في السماء وهو السميع العليم", target: 3 }, { id: "morning-praise-100", text: "سبحان الله وبحمده", target: 100 }] },
+      evening: { title: "أذكار المساء", intro: "تُقال بعد العصر أو عند دخول المساء.", items: [{ id: "evening-ayat", text: "آية الكرسي", target: 1 }, { id: "evening-protection", text: "أعوذ بكلمات الله التامات من شر ما خلق", target: 3 }, { id: "evening-forgive", text: "أستغفر الله وأتوب إليه", target: 100 }, { id: "evening-tawhid", text: "لا إله إلا الله وحده لا شريك له، له الملك وله الحمد وهو على كل شيء قدير", target: 10 }] },
+      sleep: { title: "أذكار النوم", intro: "طمأنينة قبل النوم وختم اليوم بالذكر.", items: [{ id: "sleep-ayat", text: "قراءة آية الكرسي قبل النوم", target: 1 }, { id: "sleep-subhan", text: "سبحان الله 33، الحمد لله 33، الله أكبر 34", target: 1 }, { id: "sleep-dua", text: "باسمك اللهم أموت وأحيا", target: 1 }, { id: "sleep-three", text: "قراءة الإخلاص والفلق والناس", target: 3 }] },
+      travel: { title: "أذكار السفر", intro: "قبل الانطلاق وأثناء السفر.", items: [{ id: "travel-dua", text: "سبحان الذي سخر لنا هذا وما كنا له مقرنين وإنا إلى ربنا لمنقلبون", target: 1 }, { id: "travel-takbir", text: "الله أكبر، الله أكبر، الله أكبر", target: 3 }, { id: "travel-protection", text: "اللهم إنا نسألك في سفرنا هذا البر والتقوى", target: 1 }, { id: "travel-return", text: "آيبون تائبون عابدون لربنا حامدون", target: 1 }] },
+    };
+    const category = adhkarByCategory[adhkarCategory];
+    const increaseDhikr = (id: string, target: number) => update(previous => { const adhkarCounts = { ...previous.adhkarCounts, [id]: Math.min(target, (previous.adhkarCounts[id] || 0) + 1) }; const entry = { date: previous.activeDate, prayers: { ...previous.prayers }, adhkarCounts }; return { ...previous, adhkarCounts, worshipHistory: [entry, ...previous.worshipHistory.filter(item => item.date !== previous.activeDate)].slice(0, 90) }; });
+    const history = state.worshipHistory.slice(0, 7);
+    return <div className="page-stack"><section className="page-header"><div><div className="eyebrow"><Heart size={15}/> عبادتك وطمأنينتك</div><h1>🕌 مسلم</h1><p>أذكار الصباح والمساء والنوم والسفر، مع سجل يومي لصلواتك وأذكارك.</p></div></section><section className="panel adhkar-panel"><SectionTitle icon={Heart} title="الأذكار اليومية" action={<span className="stat-chip">{Object.values(state.adhkarCounts).reduce((sum, count) => sum + count, 0)} تسبيحة</span>} /><div className="adhkar-tabs">{([['morning','الصباح'],['evening','المساء'],['sleep','النوم'],['travel','السفر']] as [AdhkarCategory,string][]).map(([id,label]) => <button type="button" className={adhkarCategory === id ? "active" : ""} onClick={() => setAdhkarCategory(id)} key={id}>{label}</button>)}</div><p className="adhkar-intro">{category.intro}</p><div className="adhkar-grid">{category.items.map(item => { const count = state.adhkarCounts[item.id] || 0; return <article className="adhkar-card" key={item.id}><span className="adhkar-icon">🤲</span><div><h3>{item.text}</h3><small>{count} / {item.target}</small></div><button type="button" onClick={() => increaseDhikr(item.id, item.target)} disabled={count >= item.target}>+1</button></article>; })}</div></section><section className="panel worship-history-panel"><SectionTitle icon={History} title="سجل الصلوات والأذكار" /><p className="section-subtitle">يُحفظ آخر 90 يومًا على جهازك.</p><div className="worship-history-list">{history.length === 0 ? <p className="notification-empty">ابدأ اليوم وسيظهر سجلك هنا.</p> : history.map(item => <article key={item.date}><strong>{formatAttendanceDate(item.date)}</strong><span>الصلوات: {Object.values(item.prayers).filter(Boolean).length} / 5</span><span>الأذكار: {Object.values(item.adhkarCounts).reduce((sum, count) => sum + count, 0)}</span></article>)}</div></section><section className="panel muslim-times-panel"><div className="section-title"><div className="section-heading"><span className="icon-surface"><Clock3 size={18}/></span><div><h2>مواقيت الصلاة</h2><p className="section-subtitle">{prayerTimesSource}</p></div></div><span className="permission-pill">اليوم {today}</span></div><div className="prayer-controls"><label>المدينة<select value={currentCity.id} onChange={event => update(previous => ({ ...previous, settings: { ...previous.settings, prayerCity: event.target.value } }))}>{PRAYER_CITIES.map(city => <option value={city.id} key={city.id}>{city.label}</option>)}</select></label><label>طريقة الحساب<select value={state.settings.prayerMethod} onChange={event => update(previous => ({ ...previous, settings: { ...previous.settings, prayerMethod: Number(event.target.value) as PrayerMethod } }))}><option value={4}>أم القرى</option><option value={5}>الهيئة المصرية</option><option value={3}>رابطة العالم الإسلامي</option><option value={2}>ISNA</option></select></label><button type="button" onClick={useMyLocation}>استخدم موقعي</button><div className="next-prayer-countdown"><span>الصلاة القادمة: {nextPrayer.name}</span><strong>{countdown}</strong></div></div><div className="qibla-card"><span>🧭 اتجاه القبلة</span><strong>{qiblaBearing}°</strong><small>من {currentCity.label} باتجاه {qiblaDirection}</small></div><div className="muslim-prayer-grid">{(Object.keys(prayerTimes) as PrayerName[]).map(prayer => { const reached = canLogPrayer(prayer); const done = state.prayers[prayer]; return <article className={`muslim-prayer-card ${done ? "is-done" : ""}`} key={prayer}><div><strong>{prayer}</strong><time>{prayerTimes[prayer]}</time></div><button type="button" disabled={!reached} onClick={() => togglePrayer(prayer)}>{done ? "تمت الصلاة ✓" : reached ? "تسجيل الصلاة" : "لم يؤذن بعد"}</button></article>; })}</div></section></div>;
   };
 
   const TodayPage = () => <>
