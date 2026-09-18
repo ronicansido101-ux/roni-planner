@@ -8,13 +8,28 @@ import App from "./App";
 import { startLogin } from "./const";
 import "./index.css";
 
+let refreshingForServiceWorker = false;
+
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
-  navigator.serviceWorker.register("/service-worker.js", { scope: "/" })
+  navigator.serviceWorker.register("/service-worker.js", { scope: "/", updateViaCache: "none" })
     .then(registration => {
       console.info("[PWA] Service worker registered", registration.scope);
       registration.update().catch(() => undefined);
+      registration.addEventListener("updatefound", () => {
+        const worker = registration.installing;
+        if (!worker) return;
+        worker.addEventListener("statechange", () => {
+          if (worker.state === "installed" && navigator.serviceWorker.controller) worker.postMessage({ type: "SKIP_WAITING" });
+        });
+      });
     })
     .catch(error => console.warn("[PWA] Service worker registration failed", error));
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!refreshingForServiceWorker) {
+      refreshingForServiceWorker = true;
+      window.location.reload();
+    }
+  });
 }
 
 const queryClient = new QueryClient();
