@@ -15,11 +15,12 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
     .then(registration => {
       console.info("[PWA] Service worker registered", registration.scope);
       registration.update().catch(() => undefined);
+      if (registration.waiting && navigator.serviceWorker.controller) window.dispatchEvent(new Event("roni-app-update"));
       registration.addEventListener("updatefound", () => {
         const worker = registration.installing;
         if (!worker) return;
         worker.addEventListener("statechange", () => {
-          if (worker.state === "installed" && navigator.serviceWorker.controller) worker.postMessage({ type: "SKIP_WAITING" });
+          if (worker.state === "installed" && navigator.serviceWorker.controller) window.dispatchEvent(new Event("roni-app-update"));
         });
       });
     })
