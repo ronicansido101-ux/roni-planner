@@ -48,6 +48,8 @@ type Note = { id: string; type: "goal" | "idea" | "reminder" | "good"; text: str
 type CustomNotification = { id: string; title: string; message: string; time: string; enabled: boolean; lastTriggered?: string };
 type WeekDay = { id: string; label: string; short: string; progress: number; status: "pending" | "complete" | "missed" };
 type AppTheme = "dark" | "light" | "pink" | "purple" | "green" | "orange" | "red" | "cyan" | "gold";
+const APP_THEMES: AppTheme[] = ["dark", "light", "pink", "purple", "green", "orange", "red", "cyan", "gold"];
+const isAppTheme = (value: unknown): value is AppTheme => typeof value === "string" && APP_THEMES.includes(value as AppTheme);
 type PlannerState = {
   activeDate: string;
   history: DayHistory[];
@@ -206,10 +208,14 @@ export default function Home() {
   const [state, setState] = useState<PlannerState>(() => {
     try {
       const saved = localStorage.getItem("roni-planner-state");
-      if (!saved) return createInitialState();
+      const savedTheme = localStorage.getItem("roni-planner-theme");
+      if (!saved) {
+        const initial = createInitialState();
+        return isAppTheme(savedTheme) ? { ...initial, settings: { ...initial.settings, theme: savedTheme } } : initial;
+      }
       const parsed = JSON.parse(saved) as Partial<PlannerState>;
       const defaults = createInitialState();
-      const loaded = { ...defaults, ...parsed, notifications: parsed.notifications ?? [], attendance: parsed.attendance ?? [], settings: { ...defaults.settings, ...(parsed.settings ?? {}) } };
+      const loaded = { ...defaults, ...parsed, notifications: parsed.notifications ?? [], attendance: parsed.attendance ?? [], settings: { ...defaults.settings, ...(parsed.settings ?? {}), ...(isAppTheme(savedTheme) ? { theme: savedTheme } : {}) } };
       return loaded.activeDate !== defaults.activeDate ? resetDailyProgress(loaded, defaults.activeDate) : loaded;
     } catch { return createInitialState(); }
   });
@@ -331,6 +337,7 @@ export default function Home() {
     return () => { window.removeEventListener("beforeinstallprompt", onInstallPrompt); window.removeEventListener("appinstalled", onInstalled); };
   }, []);
   useEffect(() => { localStorage.setItem("roni-planner-state", JSON.stringify(state)); }, [state]);
+  useEffect(() => { localStorage.setItem("roni-planner-theme", state.settings.theme); }, [state.settings.theme]);
   useEffect(() => {
     const onUpdate = () => {
       setUpdateAvailable(true);
@@ -342,7 +349,7 @@ export default function Home() {
   useEffect(() => {
     if (!isAuthenticated) { setRemoteReady(true); return; }
     if (!remote.isFetched) return;
-    if (remote.data?.data) { try { const parsed = JSON.parse(remote.data.data) as Partial<PlannerState>; setState(previous => { const todayKey = getLocalDateKey(); const loaded = { ...previous, ...parsed, history: parsed.history ?? previous.history ?? [], worshipHistory: parsed.worshipHistory ?? previous.worshipHistory ?? [], adhkarCounts: parsed.adhkarCounts ?? previous.adhkarCounts ?? {}, notifications: parsed.notifications ?? previous.notifications ?? [], attendance: parsed.attendance ?? previous.attendance ?? [], settings: { ...previous.settings, ...(parsed.settings ?? {}) } }; return loaded.activeDate !== todayKey ? resetDailyProgress(loaded, todayKey) : loaded; }); } catch { /* retain local data if a stale document is malformed */ } }
+    if (remote.data?.data) { try { const parsed = JSON.parse(remote.data.data) as Partial<PlannerState>; setState(previous => { const todayKey = getLocalDateKey(); const localTheme = localStorage.getItem("roni-planner-theme"); const remoteTheme = parsed.settings?.theme; const stableTheme = isAppTheme(localTheme) ? localTheme : isAppTheme(remoteTheme) ? remoteTheme : previous.settings.theme; const loaded = { ...previous, ...parsed, history: parsed.history ?? previous.history ?? [], worshipHistory: parsed.worshipHistory ?? previous.worshipHistory ?? [], adhkarCounts: parsed.adhkarCounts ?? previous.adhkarCounts ?? {}, notifications: parsed.notifications ?? previous.notifications ?? [], attendance: parsed.attendance ?? previous.attendance ?? [], settings: { ...previous.settings, ...(parsed.settings ?? {}), theme: stableTheme } }; return loaded.activeDate !== todayKey ? resetDailyProgress(loaded, todayKey) : loaded; }); } catch { /* retain local data if a stale document is malformed */ } }
     setRemoteReady(true);
   }, [isAuthenticated, remote.isFetched, remote.data?.data]);
   useEffect(() => {
