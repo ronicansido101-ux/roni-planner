@@ -427,8 +427,13 @@ export default function Home() {
       const todayKey = getLocalDateKey();
       const currentTime = now.toTimeString().slice(0, 5);
       const dueCustom = state.notifications.find(item => item.enabled && item.time === currentTime && item.lastTriggered !== todayKey);
-      const dueTask = state.tasks.find(item => !item.done && (state.settings.taskReminders !== false || item.autoComplete) && getReminderTime(item.time) !== null && getReminderTime(item.time)! <= currentTime && item.lastTriggered !== todayKey);
-      if (!dueCustom && !dueTask) return;
+      const overdueAutoTasks = state.tasks.filter(item => !item.done && item.autoComplete && getReminderTime(item.time) !== null && getReminderTime(item.time)! < currentTime && item.lastTriggered !== todayKey);
+      const dueTask = state.tasks.find(item => !item.done && (state.settings.taskReminders !== false || item.autoComplete) && getReminderTime(item.time) === currentTime && item.lastTriggered !== todayKey);
+      if (!dueCustom && !dueTask && overdueAutoTasks.length === 0) return;
+      if (overdueAutoTasks.length > 0) {
+        const overdueIds = new Set(overdueAutoTasks.map(item => item.id));
+        update(previous => ({ ...previous, tasks: previous.tasks.map(item => overdueIds.has(item.id) ? { ...item, lastTriggered: todayKey, done: true } : item) }));
+      }
       if (dueCustom) {
         update(previous => ({ ...previous, notifications: previous.notifications.map(item => item.id === dueCustom.id ? { ...item, lastTriggered: todayKey } : item) }));
         setActiveAlert(dueCustom);
