@@ -186,6 +186,10 @@ function getReminderTime(value: string) {
 }
 
 function openSystemAlarm(title: string, time: string) {
+  if (!/Android/i.test(navigator.userAgent)) {
+    window.alert("فتح منبّه النظام يعمل من هاتف Android فقط. افتح RONI Planner من Chrome على الهاتف.");
+    return;
+  }
   const normalized = getReminderTime(time) ?? time.match(/^([01]?\d|2[0-3]):([0-5]\d)$/)?.[0];
   if (!normalized) {
     window.alert("لا يوجد وقت واضح لهذه المهمة. أضف الوقت أولًا بصيغة 08:30.");
@@ -408,7 +412,7 @@ export default function Home() {
       const todayKey = getLocalDateKey();
       const currentTime = now.toTimeString().slice(0, 5);
       const dueCustom = state.notifications.find(item => item.enabled && item.time === currentTime && item.lastTriggered !== todayKey);
-      const dueTask = state.tasks.find(item => !item.done && (state.settings.taskReminders !== false || item.autoComplete) && getReminderTime(item.time) === currentTime && item.lastTriggered !== todayKey);
+      const dueTask = state.tasks.find(item => !item.done && (state.settings.taskReminders !== false || item.autoComplete) && getReminderTime(item.time) !== null && getReminderTime(item.time)! <= currentTime && item.lastTriggered !== todayKey);
       if (!dueCustom && !dueTask) return;
       if (dueCustom) {
         update(previous => ({ ...previous, notifications: previous.notifications.map(item => item.id === dueCustom.id ? { ...item, lastTriggered: todayKey } : item) }));
