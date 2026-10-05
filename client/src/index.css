@@ -121,3 +121,4 @@ body { background:#08111f; }
 .weekend-lock-message { margin: 0 0 12px; padding: 11px 14px; border: 1px solid rgba(232,180,74,.35); border-radius: 13px; background: rgba(232,180,74,.12); color: var(--text); font-size: 12px; font-weight: 800; }
 input[type="time"] { cursor: text; font-variant-numeric: tabular-nums; }
 input[type="time"]:focus { outline: 2px solid var(--blue-2); outline-offset: 1px; }
+.onboarding-error { position: relative; margin: 14px 0 0; padding: 10px 12px; border: 1px solid rgba(248,113,113,.45); border-radius: 11px; background: rgba(248,113,113,.12); color: #fecaca; font-size: 11px; font-weight: 800; line-height: 1.7; }
