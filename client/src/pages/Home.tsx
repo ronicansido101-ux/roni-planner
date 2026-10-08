@@ -75,7 +75,6 @@ type OnboardingProfile = { wake: string; breakfast: string; lunch: string; dinne
 type TimePartsInputProps = { value: string; onChange: (value: string) => void; ariaLabel: string };
 const TimePartsInput = ({ value, onChange, ariaLabel }: TimePartsInputProps) => {
   const [parts, setParts] = useState(() => { const [hour = "", minute = ""] = value.split(":"); return { hour, minute }; });
-  useEffect(() => { const [hour = "", minute = ""] = value.split(":"); setParts({ hour, minute }); }, [value]);
   const commit = (next = parts) => { const hour = Number(next.hour); const minute = Number(next.minute); if (Number.isInteger(hour) && hour >= 0 && hour <= 23 && Number.isInteger(minute) && minute >= 0 && minute <= 59) onChange(`${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`); };
   const updatePart = (part: "hour" | "minute", raw: string) => { const next = { ...parts, [part]: raw.replace(/\D/g, "").slice(0, 2) }; setParts(next); };
   const adjustPart = (part: "hour" | "minute", amount: number) => { const max = part === "hour" ? 23 : 59; const current = Number(parts[part]); const nextValue = Number.isFinite(current) ? (current + amount + max + 1) % (max + 1) : 0; updatePart(part, String(nextValue).padStart(2, "0")); };
