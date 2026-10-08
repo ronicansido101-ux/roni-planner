@@ -74,12 +74,38 @@ type WorshipHistoryEntry = { date: string; prayers: Record<string, boolean>; adh
 type OnboardingProfile = { wake: string; breakfast: string; lunch: string; dinner: string; sleep: string; activity: "school" | "university" | "work"; activityName: string; activityStart: string; activityEnd: string };
 type TimePartsInputProps = { value: string; onChange: (value: string) => void; ariaLabel: string };
 const TimePartsInput = ({ value, onChange, ariaLabel }: TimePartsInputProps) => {
-  const [parts, setParts] = useState(() => { const [hour = "", minute = ""] = value.split(":"); return { hour, minute }; });
-  const commit = (next = parts) => { const hour = Number(next.hour); const minute = Number(next.minute); if (Number.isInteger(hour) && hour >= 0 && hour <= 23 && Number.isInteger(minute) && minute >= 0 && minute <= 59) onChange(`${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`); };
-  const updatePart = (part: "hour" | "minute", raw: string) => { const next = { ...parts, [part]: raw.replace(/\D/g, "").slice(0, 2) }; setParts(next); };
-  const adjustPart = (part: "hour" | "minute", amount: number) => { const max = part === "hour" ? 23 : 59; const current = Number(parts[part]); const nextValue = Number.isFinite(current) ? (current + amount + max + 1) % (max + 1) : 0; updatePart(part, String(nextValue).padStart(2, "0")); };
-  const handleKey = (part: "hour" | "minute") => (event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); event.stopPropagation(); adjustPart(part, event.key === "ArrowUp" ? 1 : -1); } if (event.key === "Enter") { commit(); event.currentTarget.blur(); } };
-  return <span className="time-parts-input" role="group" aria-label={ariaLabel}><input type="text" inputMode="numeric" maxLength={2} value={parts.hour} placeholder="00" aria-label={`${ariaLabel} - الساعة`} onFocus={event => event.currentTarget.select()} onChange={event => updatePart("hour", event.target.value)} onBlur={() => commit()} onKeyDown={handleKey("hour")} /><b>:</b><input type="text" inputMode="numeric" maxLength={2} value={parts.minute} placeholder="00" aria-label={`${ariaLabel} - الدقائق`} onFocus={event => event.currentTarget.select()} onChange={event => updatePart("minute", event.target.value)} onBlur={() => commit()} onKeyDown={handleKey("minute")} /></span>;
+  const [hour, minute] = value.split(":");
+  const hourRef = useRef<HTMLInputElement>(null);
+  const minuteRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (document.activeElement !== hourRef.current && document.activeElement !== minuteRef.current) {
+      if (hourRef.current) hourRef.current.value = hour || "";
+      if (minuteRef.current) minuteRef.current.value = minute || "";
+    }
+  }, [value, hour, minute]);
+  const commit = () => {
+    const nextHour = hourRef.current?.value.replace(/\D/g, "").slice(0, 2) || "";
+    const nextMinute = minuteRef.current?.value.replace(/\D/g, "").slice(0, 2) || "";
+    const hourNumber = Number(nextHour);
+    const minuteNumber = Number(nextMinute);
+    if (Number.isInteger(hourNumber) && hourNumber >= 0 && hourNumber <= 23 && Number.isInteger(minuteNumber) && minuteNumber >= 0 && minuteNumber <= 59) {
+      const formatted = `${String(hourNumber).padStart(2, "0")}:${String(minuteNumber).padStart(2, "0")}`;
+      if (hourRef.current) hourRef.current.value = String(hourNumber).padStart(2, "0");
+      if (minuteRef.current) minuteRef.current.value = String(minuteNumber).padStart(2, "0");
+      onChange(formatted);
+    }
+  };
+  const adjustPart = (part: "hour" | "minute", amount: number) => {
+    const ref = part === "hour" ? hourRef : minuteRef;
+    const max = part === "hour" ? 23 : 59;
+    const current = Number(ref.current?.value || 0);
+    if (ref.current) ref.current.value = String((current + amount + max + 1) % (max + 1)).padStart(2, "0");
+  };
+  const handleKey = (part: "hour" | "minute") => (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); event.stopPropagation(); adjustPart(part, event.key === "ArrowUp" ? 1 : -1); }
+    if (event.key === "Enter") { commit(); event.currentTarget.blur(); }
+  };
+  return <span className="time-parts-input" role="group" aria-label={ariaLabel}><input ref={hourRef} type="text" inputMode="numeric" maxLength={2} defaultValue={hour || ""} placeholder="00" aria-label={`${ariaLabel} - الساعة`} onFocus={event => event.currentTarget.select()} onBlur={commit} onKeyDown={handleKey("hour")} /><b>:</b><input ref={minuteRef} type="text" inputMode="numeric" maxLength={2} defaultValue={minute || ""} placeholder="00" aria-label={`${ariaLabel} - الدقائق`} onFocus={event => event.currentTarget.select()} onBlur={commit} onKeyDown={handleKey("minute")} /></span>;
 };
 type PrayerCity = { id: string; label: string; city: string; country: string; latitude: number; longitude: number };
 const PRAYER_CITIES: PrayerCity[] = [
