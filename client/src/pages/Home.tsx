@@ -77,12 +77,6 @@ const TimePartsInput = ({ value, onChange, ariaLabel }: TimePartsInputProps) => 
   const [hour, minute] = value.split(":");
   const hourRef = useRef<HTMLInputElement>(null);
   const minuteRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (document.activeElement !== hourRef.current && document.activeElement !== minuteRef.current) {
-      if (hourRef.current) hourRef.current.value = hour || "";
-      if (minuteRef.current) minuteRef.current.value = minute || "";
-    }
-  }, [value, hour, minute]);
   const commit = () => {
     const nextHour = hourRef.current?.value.replace(/\D/g, "").slice(0, 2) || "";
     const nextMinute = minuteRef.current?.value.replace(/\D/g, "").slice(0, 2) || "";
