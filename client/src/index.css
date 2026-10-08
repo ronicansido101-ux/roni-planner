@@ -128,3 +128,10 @@ input[type="time"]:focus { outline: 2px solid var(--blue-2); outline-offset: 1px
 .onboarding-grid { min-width: 0; }
 .onboarding-grid input, .onboarding-grid select { min-width: 0; background: #303b50; }
 .schedule-edit-fields input[type="time"], .quick-add input[type="time"] { min-width: 0; }
+
+.time-parts-input { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 88px; direction: ltr; }
+.time-parts-input input { width: 36px; min-width: 0; text-align: center; appearance: textfield; -moz-appearance: textfield; }
+.time-parts-input input::-webkit-outer-spin-button, .time-parts-input input::-webkit-inner-spin-button { opacity: 1; }
+.time-parts-input b { color: var(--muted); font-weight: 900; }
+.schedule-edit-fields .time-parts-input input { width: 30px; padding-inline: 2px; }
+@media (max-width:720px) { .time-parts-input input { width: 40px; } }
