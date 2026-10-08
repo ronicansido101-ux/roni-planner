@@ -122,3 +122,9 @@ body { background:#08111f; }
 input[type="time"] { cursor: text; font-variant-numeric: tabular-nums; }
 input[type="time"]:focus { outline: 2px solid var(--blue-2); outline-offset: 1px; }
 .onboarding-error { position: relative; margin: 14px 0 0; padding: 10px 12px; border: 1px solid rgba(248,113,113,.45); border-radius: 11px; background: rgba(248,113,113,.12); color: #fecaca; font-size: 11px; font-weight: 800; line-height: 1.7; }
+/* Clear, isolated schedule onboarding dialog */
+.onboarding-backdrop { background: rgba(3,7,18,.88); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); overflow: auto; overscroll-behavior: contain; }
+.onboarding-card { width: min(620px, calc(100vw - 32px)); max-height: min(86vh, 700px); overflow-x: hidden; overflow-y: auto; background: #202b40; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: 0 28px 90px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.22); }
+.onboarding-grid { min-width: 0; }
+.onboarding-grid input, .onboarding-grid select { min-width: 0; background: #303b50; }
+.schedule-edit-fields input[type="time"], .quick-add input[type="time"] { min-width: 0; }
